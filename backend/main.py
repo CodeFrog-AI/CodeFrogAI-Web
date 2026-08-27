@@ -1,5 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.db.database import DatabaseConnectionError, check_database_connection
 
 app = FastAPI(
     title="CodeFrog AI API",
@@ -30,7 +32,12 @@ def root():
 
 @app.get("/health")
 def health():
+    try:
+        check_database_connection()
+    except DatabaseConnectionError as error:
+        raise HTTPException(status_code=503, detail="Database is unavailable") from error
+
     return {
         "status": "healthy",
+        "database": "healthy",
     }
-    
