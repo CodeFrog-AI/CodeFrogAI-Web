@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     """Settings loaded from the process environment or a local .env file."""
 
     database_url: PostgresDsn
+    log_level: str = "INFO"
 
     model_config = SettingsConfigDict(
         env_file=".env",

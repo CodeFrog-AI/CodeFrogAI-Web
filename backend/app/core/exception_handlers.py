@@ -49,6 +49,9 @@ def safe_validation_details(error: RequestValidationError) -> list[ValidationErr
 async def application_error_handler(
     _request: Request, error: ApplicationError
 ) -> JSONResponse:
+    logger.warning(
+        "Application error code=%s status_code=%s", error.code, error.status_code
+    )
     return error_response(error.status_code, error.code, error.message, error.details)
 
 
@@ -78,7 +81,10 @@ async def database_exception_handler(_request: Request, error: SQLAlchemyError) 
 
 
 async def unexpected_exception_handler(_request: Request, error: Exception) -> JSONResponse:
-    logger.error("Unexpected server error (exception type=%s)", type(error).__name__)
+    logger.error(
+        "Unexpected server error (exception type=%s)",
+        type(error).__name__,
+    )
     return error_response(500, "INTERNAL_SERVER_ERROR", "An unexpected error occurred")
 
 
