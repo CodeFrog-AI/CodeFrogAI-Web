@@ -757,9 +757,11 @@ Agent / Response
 
 ## Backend
 
-* Node.js
-* Express.js
-* TypeScript
+* Python
+* FastAPI
+* Uvicorn
+* Pydantic
+* SQLAlchemy
 
 ## Database
 
