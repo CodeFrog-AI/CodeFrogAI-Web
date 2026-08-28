@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.api.routes.health import build_health_response
+from app.core.exception_handlers import register_exception_handlers
 from app.db.database import check_database_connection
 
 app = FastAPI(
@@ -10,6 +11,8 @@ app = FastAPI(
     description="AI-powered Software Engineer API",
     version="0.1.0",
 )
+
+register_exception_handlers(app)
 
 
 app.add_middleware(
