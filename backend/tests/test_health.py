@@ -22,4 +22,10 @@ def test_health_returns_safe_service_unavailable_response(monkeypatch):
     response = TestClient(app).get("/health")
 
     assert response.status_code == 503
-    assert response.json() == {"detail": "Database is unavailable"}
+    assert response.json() == {
+        "error": {
+            "code": "SERVICE_UNAVAILABLE",
+            "message": "Service unavailable",
+            "details": None,
+        }
+    }
