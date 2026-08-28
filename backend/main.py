@@ -1,7 +1,9 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.db.database import DatabaseConnectionError, check_database_connection
+from app.api.router import api_router
+from app.api.routes.health import build_health_response
+from app.db.database import check_database_connection
 
 app = FastAPI(
     title="CodeFrog AI API",
@@ -21,6 +23,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(api_router)
+
 
 @app.get("/")
 def root():
@@ -32,12 +36,6 @@ def root():
 
 @app.get("/health")
 def health():
-    try:
-        check_database_connection()
-    except DatabaseConnectionError as error:
-        raise HTTPException(status_code=503, detail="Database is unavailable") from error
+    """Legacy health endpoint retained for existing clients."""
 
-    return {
-        "status": "healthy",
-        "database": "healthy",
-    }
+    return build_health_response(check_database_connection)
