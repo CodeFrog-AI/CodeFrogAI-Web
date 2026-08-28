@@ -1,15 +1,34 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.api.routes.health import build_health_response
+from app.core.config import get_settings
 from app.core.exception_handlers import register_exception_handlers
+from app.core.logging import RequestLoggingMiddleware, configure_logging
 from app.db.database import check_database_connection
+
+configure_logging(get_settings().log_level)
+logger = logging.getLogger("codefrog.application")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Record concise application lifecycle events."""
+
+    logger.info("Application starting")
+    yield
+    logger.info("Application shutting down")
+
 
 app = FastAPI(
     title="CodeFrog AI API",
     description="AI-powered Software Engineer API",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 register_exception_handlers(app)
@@ -24,7 +43,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
+
+app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(api_router)
 
