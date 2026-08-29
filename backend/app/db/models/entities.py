@@ -47,6 +47,7 @@ class User(TimestampMixin, Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
     name: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     github_accounts: Mapped[list["GitHubAccount"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
