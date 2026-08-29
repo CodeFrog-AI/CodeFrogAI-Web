@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import PostgresDsn, ValidationError, field_validator
+from pydantic import Field, PostgresDsn, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     app_env: Literal["development", "test", "production"] = "development"
     database_url: PostgresDsn
     log_level: str = "INFO"
+    auth_secret_key: SecretStr = Field(min_length=32)
+    auth_algorithm: Literal["HS256"] = "HS256"
+    access_token_expire_minutes: int = Field(default=60, ge=1, le=1_440)
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

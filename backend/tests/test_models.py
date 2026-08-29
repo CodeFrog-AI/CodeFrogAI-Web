@@ -34,3 +34,4 @@ def test_key_integrity_constraints_are_declared():
     assert "uq_repository_files_path" in file_constraints
     assert "ck_repository_chunks_line_range" in chunk_checks
     assert "ck_agent_tasks_status" in task_checks
+    assert User.__table__.c.password_hash.nullable
