@@ -1215,7 +1215,9 @@ The backend reads configuration from environment variables and a repository-root
    uvicorn main:app --app-dir backend --reload
    ```
 
-`DATABASE_URL` is required. `APP_NAME`, `APP_ENV` (`development`, `test`, or `production`), and `LOG_LEVEL` are optional. Use a PostgreSQL psycopg URL, such as `postgresql+psycopg://USER:PASSWORD@localhost:5432/DATABASE`.
+`DATABASE_URL` and `AUTH_SECRET_KEY` are required. Generate a unique local `AUTH_SECRET_KEY` of at least 32 characters; it signs short-lived local authentication tokens and must never be committed. `APP_NAME`, `APP_ENV` (`development`, `test`, or `production`), and `LOG_LEVEL` are optional. Use a PostgreSQL psycopg URL, such as `postgresql+psycopg://USER:PASSWORD@localhost:5432/DATABASE`.
+
+Local account passwords must be at least 12 characters. They are stored only as Argon2 hashes; registration and public-user responses never expose password hashes.
 
 Run the backend tests with:
 
