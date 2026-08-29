@@ -11,7 +11,8 @@ from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import RequestLoggingMiddleware, configure_logging
 from app.db.database import check_database_connection
 
-configure_logging(get_settings().log_level)
+settings = get_settings()
+configure_logging(settings.log_level)
 logger = logging.getLogger("codefrog.application")
 
 
@@ -25,7 +26,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="CodeFrog AI API",
+    title=settings.app_name,
     description="AI-powered Software Engineer API",
     version="0.1.0",
     lifespan=lifespan,
