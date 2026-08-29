@@ -5,9 +5,9 @@ services:
     restart: unless-stopped
 
     environment:
-      POSTGRES_USER: codefrog
-      POSTGRES_PASSWORD: codefrog_dev
-      POSTGRES_DB: codefrog
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
 
     ports:
       - "5432:5432"
@@ -17,4 +17,3 @@ services:
 
 volumes:
   postgres_data:
-  

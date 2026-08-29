@@ -1191,5 +1191,37 @@ License information will be added as the project develops.
 
 </p>
 
+---
+
+## Local backend setup
+
+The backend reads configuration from environment variables and a repository-root `.env` file. Never commit `.env` or place real credentials in `.env.example`.
+
+1. Copy the safe template and replace every `YOUR_...` placeholder with local-only values:
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+2. Start PostgreSQL. Docker Compose reads `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` from `.env`:
+
+   ```powershell
+   docker compose up -d postgres
+   ```
+
+3. Run the API from the repository root:
+
+   ```powershell
+   uvicorn main:app --app-dir backend --reload
+   ```
+
+`DATABASE_URL` is required. `APP_NAME`, `APP_ENV` (`development`, `test`, or `production`), and `LOG_LEVEL` are optional. Use a PostgreSQL psycopg URL, such as `postgresql+psycopg://USER:PASSWORD@localhost:5432/DATABASE`.
+
+Run the backend tests with:
+
+```powershell
+python -m pytest backend/tests -q
+```
+
 
 
