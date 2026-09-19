@@ -6,11 +6,13 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from app.api.routes import github_oauth
 from app.auth.github_service import resolve_github_identity
 from app.auth.oauth_state import OAuthStateStore
+from app.core.config import get_settings
 from app.db.database import get_db
 from app.db.models import GitHubAccount, User
 from app.integrations.github.oauth import GitHubIdentity, GitHubOAuthError, GitHubOAuthClient
@@ -210,6 +212,20 @@ def test_tokens_codes_and_client_secrets_are_not_logged(oauth_client, caplog):
     assert "unsafe-code" not in caplog.text
     assert "github-access-token" not in caplog.text
     assert "test-github-client-secret" not in caplog.text
+
+
+def test_callback_stores_the_github_token_encrypted_only(oauth_client):
+    test_client, session = oauth_client
+    state = begin_oauth(test_client)
+
+    callback = test_client.get(f"/api/v1/auth/github/callback?state={state}&code=code")
+
+    stored = session.accounts[12345].access_token_encrypted
+    key = get_settings().token_encryption_key.get_secret_value().encode()
+    assert callback.status_code == 200
+    assert stored is not None and "github-access-token" not in stored
+    assert Fernet(key).decrypt(stored.encode()).decode() == "github-access-token-that-must-not-leak"
+    assert "github-access-token" not in callback.text
 
 
 def test_state_store_rejects_expired_values(monkeypatch):

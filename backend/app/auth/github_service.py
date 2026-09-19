@@ -7,6 +7,7 @@ from app.auth.service import find_user_by_email
 from app.core.exceptions import BadRequestError
 from app.db.models import GitHubAccount, User
 from app.integrations.github.oauth import GitHubIdentity
+from app.integrations.github.tokens import encrypt_access_token
 
 
 def find_github_account(session: Session, github_user_id: int) -> GitHubAccount | None:
@@ -48,3 +49,14 @@ def resolve_github_identity(session: Session, identity: GitHubIdentity) -> User:
         raise BadRequestError("GitHub authentication could not be completed") from None
     session.refresh(user)
     return user
+
+
+def store_github_token(session: Session, github_user_id: int, access_token: str) -> None:
+    """Persist the encrypted provider token so the server can call GitHub for the user."""
+
+    account = find_github_account(session, github_user_id)
+    encrypted = encrypt_access_token(access_token)
+    if account is None or encrypted is None:
+        return
+    account.access_token_encrypted = encrypted
+    session.commit()

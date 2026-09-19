@@ -18,3 +18,12 @@ def decrypt_access_token(encrypted_token: str | None) -> str | None:
         return Fernet(key.get_secret_value().encode()).decrypt(encrypted_token.encode()).decode()
     except (InvalidToken, ValueError):
         raise GitHubAuthError("GitHub token could not be decrypted") from None
+
+
+def encrypt_access_token(access_token: str) -> str | None:
+    """Encrypt a token for storage, or return None when no encryption key is configured."""
+
+    key = get_settings().token_encryption_key
+    if key is None:
+        return None
+    return Fernet(key.get_secret_value().encode()).encrypt(access_token.encode()).decode()
