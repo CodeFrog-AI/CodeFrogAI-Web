@@ -100,6 +100,8 @@ def run_agent(
     *,
     history: Sequence[Mapping[str, str]] = (),
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    system_prompt: str | None = None,
+    limit_notice: str = LIMIT_NOTICE,
 ) -> AgentResult:
     """Answer `message` about `repository` using at most `max_iterations` model calls.
 
@@ -113,7 +115,7 @@ def run_agent(
     context = ToolContext(session, user, embedding_provider_factory)
     specs = agent_tool_specs()
     messages: list[Message] = [
-        {"role": "system", "content": SYSTEM_PROMPT.format(owner=repository.owner, name=repository.name)},
+        {"role": "system", "content": system_prompt or SYSTEM_PROMPT.format(owner=repository.owner, name=repository.name)},
         *({"role": item["role"], "content": item["content"]} for item in history),
         {"role": "user", "content": message},
     ]
@@ -139,7 +141,7 @@ def run_agent(
 
     # The tool budget is spent: one last call with no tools, so the model has to answer.
     iterations += 1
-    messages.append({"role": "user", "content": LIMIT_NOTICE})
+    messages.append({"role": "user", "content": limit_notice})
     response = provider.complete(messages, None)
     return finish((response.content or "").strip() or FALLBACK_ANSWER, "max_iterations")
 
