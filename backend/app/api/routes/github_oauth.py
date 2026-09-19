@@ -8,7 +8,7 @@ from fastapi import APIRouter, Cookie, Depends, Query, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.auth.github_service import resolve_github_identity
+from app.auth.github_service import resolve_github_identity, store_github_token
 from app.auth.oauth_state import oauth_state_store
 from app.auth.security import create_access_token
 from app.core.config import get_settings
@@ -73,6 +73,7 @@ def github_callback(
     user = resolve_github_identity(session, identity)
     if user.status != "active":
         raise UnauthorizedError("GitHub authentication could not be completed")
+    store_github_token(session, identity.github_user_id, github_access_token)
 
     logger.info("GitHub OAuth identity resolved")
     return AccessTokenResponse(access_token=create_access_token(user.id))
