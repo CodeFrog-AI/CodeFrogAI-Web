@@ -9,9 +9,20 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
-from app.core.exceptions import BadGatewayError, ForbiddenError, NotFoundError
+from app.core.exceptions import (
+    BadGatewayError,
+    ForbiddenError,
+    NotFoundError,
+    ServiceUnavailableError,
+)
 from app.db.database import get_db
 from app.db.models import GitHubAccount, Repository, User
+from app.embeddings.indexing import index_repository_embeddings
+from app.embeddings.provider import (
+    EmbeddingError,
+    EmbeddingNotConfiguredError,
+    get_embedding_provider,
+)
 from app.integrations.github.connection import (
     connect_repository,
     connected_repository_ids,
@@ -30,9 +41,18 @@ from app.scanner.search import (
     MAX_RESULT_LIMIT,
     search_repository_code,
 )
+from app.scanner.semantic import (
+    DEFAULT_SEMANTIC_LIMIT,
+    MAX_SEMANTIC_LIMIT,
+    MAX_SEMANTIC_QUERY_LENGTH,
+    semantic_search,
+)
 from app.scanner.service import get_owned_repository, scan_repository
 from app.schemas.availability import ResourceAvailabilityResponse
 from app.schemas.repositories import (
+    EmbeddingIndexResponse,
+    SemanticSearchResponse,
+    SemanticSearchResult,
     CodeSearchResponse,
     CodeSearchResult,
     ConnectedRepositoryResponse,
@@ -174,4 +194,56 @@ def search_repository(
         repository_id=repository.id,
         query=search_text,
         results=[CodeSearchResult(**vars(hit)) for hit in hits],
+    )
+
+
+@contextmanager
+def _embedding_errors() -> Iterator[None]:
+    """Translate embedding provider failures into safe, client-facing API errors."""
+
+    try:
+        yield
+    except EmbeddingNotConfiguredError:
+        raise ServiceUnavailableError("Semantic search is not configured") from None
+    except EmbeddingError:
+        raise BadGatewayError("Embedding provider request failed. Try again later.") from None
+
+
+@router.post("/{repository_id}/embeddings", response_model=EmbeddingIndexResponse)
+def index_repository_chunk_embeddings(
+    repository_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+) -> EmbeddingIndexResponse:
+    """Generate embeddings for new or changed chunks of a repository owned by the caller."""
+
+    repository = get_owned_repository(session, repository_id, current_user)
+    with _embedding_errors():
+        summary = index_repository_embeddings(session, repository, get_embedding_provider())
+    return EmbeddingIndexResponse(
+        repository_id=repository.id, status="completed", **vars(summary)
+    )
+
+
+@router.get("/{repository_id}/semantic-search", response_model=SemanticSearchResponse)
+def semantic_search_repository(
+    repository_id: uuid.UUID,
+    query: Annotated[str, Query(min_length=1, max_length=MAX_SEMANTIC_QUERY_LENGTH, pattern=r"\S")],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=MAX_SEMANTIC_LIMIT)] = DEFAULT_SEMANTIC_LIMIT,
+    min_score: Annotated[float | None, Query(ge=-1, le=1)] = None,
+) -> SemanticSearchResponse:
+    """Find code chunks semantically related to a natural-language query."""
+
+    repository = get_owned_repository(session, repository_id, current_user)
+    search_text = query.strip()
+    with _embedding_errors():
+        hits = semantic_search(
+            session, repository, get_embedding_provider(), search_text, limit, min_score
+        )
+    return SemanticSearchResponse(
+        repository_id=repository.id,
+        query=search_text,
+        results=[SemanticSearchResult(**vars(hit)) for hit in hits],
     )
