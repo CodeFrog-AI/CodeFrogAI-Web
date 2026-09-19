@@ -55,3 +55,9 @@ class ServiceUnavailableError(ApplicationError):
     status_code = 503
     code = "SERVICE_UNAVAILABLE"
     message = "The service is temporarily unavailable"
+
+
+class RateLimitedError(ApplicationError):
+    status_code = 429
+    code = "RATE_LIMITED"
+    message = "An upstream rate limit was reached. Try again later."

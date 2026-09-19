@@ -315,6 +315,12 @@ class GitRepository:
             raise GitError("PUSH_FAILED", "The branch could not be pushed. Try again later.", 502)
         return PushResult(branch=branch, commit=commit)
 
+    def current_pull_request_branch(self) -> str:
+        """The branch a pull request may be opened from: the current `codefrog/` branch, never main or master."""
+
+        self.verify_origin()
+        return self._require_codefrog_branch("Pull requests can only be created from a CodeFrog branch.")
+
     def fetch(self, token: str | None) -> None:
         self.verify_origin()
         if not self._run(["fetch", "--no-tags", REMOTE], token=token, network=True).ok:
