@@ -13,3 +13,6 @@ __pycache__/
 # Virtual environment
 .venv/
 venv/
+
+# Local agent workspaces (Git checkouts)
+.codefrog-workspaces/

@@ -23,6 +23,7 @@ from app.schemas.plan import ImplementationPlan
 from app.tools import ToolContext, execute_tool, tool_definitions
 from app.workspace import Workspace, WorkspaceError, WriteScope, exclusive_workspace
 from app.workspace import workspace as workspace_module
+from tests.git_helpers import fake_github  # noqa: F401
 from tests.test_agent_loop import API_KEY, FakeLLM, LoopingLLM, call, calls, say, tool_result, use_llm
 from tests.test_agent_planning import make_plan, snapshot
 from tests.test_repository_context import SECRET_LINES, SECRET_VALUES
@@ -30,6 +31,11 @@ from tests.test_semantic_search import client, create_repository, database  # no
 
 REQUEST = "Make the button say Save."
 BACKSLASH = chr(92)
+
+
+def checkout(tmp_path, repository_id):
+    return tmp_path / "workspaces" / "repositories" / str(repository_id)
+
 UI = "app/ui.py"
 FILES = {
     UI: [(1, "render button with css layout\nlabel = 'OK'\n")],
@@ -40,7 +46,7 @@ FILES = {
 
 
 @pytest.fixture(autouse=True)
-def isolated(monkeypatch, tmp_path):
+def isolated(monkeypatch, tmp_path, fake_github):
     """No real providers, and every workspace lives in this test's temporary directory."""
 
     def llm_unconfigured():
@@ -77,10 +83,12 @@ def tool_codes(llm):
 
 def workspace_for(tmp_path, files=None, *, create=(), modify=(), delete=(), **limits):
     scope = WriteScope(frozenset(create), frozenset(modify), frozenset(delete))
-    workspace = Workspace.prepare(tmp_path / "ws", uuid.uuid4(), scope, **limits)
+    root = tmp_path / "ws"
+    root.mkdir()
     for path, text in (files if files is not None else {UI: "a = 1\n", "app/twice.py": "v = 1\nv = 1\n"}).items():
-        workspace._copy_in(path, text)
-    return workspace
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_bytes(text.encode())
+    return Workspace.attach(root, uuid.uuid4(), scope, **limits)
 
 
 def read(workspace, path):
@@ -376,14 +384,14 @@ def test_diffs_never_contain_secrets(tmp_path):
     assert not [value for value in SECRET_VALUES if value in diff]
 
 
-def test_one_execution_per_repository_at_a_time():
+def test_one_execution_per_repository_at_a_time(tmp_path):
     repository_id = uuid.uuid4()
 
-    with exclusive_workspace(repository_id):
+    with exclusive_workspace(tmp_path, repository_id):
         with pytest.raises(ConflictError):
-            with exclusive_workspace(repository_id):
+            with exclusive_workspace(tmp_path, repository_id):
                 pass
-    with exclusive_workspace(repository_id):
+    with exclusive_workspace(tmp_path, repository_id):
         pass
 
 
@@ -402,7 +410,7 @@ def test_an_approved_plan_executes_and_returns_the_diff(client, database, monkey
     assert [(c["path"], c["action"], c["additions"], c["deletions"]) for c in body["changes"]] == [(UI, "modified", 1, 1)]
     assert "-label = 'OK'" in body["changes"][0]["diff"] and "+label = 'Save'" in body["changes"][0]["diff"]
     assert body["metadata"]["tool_calls"] == 1 and body["metadata"]["write_operations"] == 1
-    assert (tmp_path / "workspaces" / str(repository_id) / "app" / "ui.py").read_text() == "render button with css layout\nlabel = 'Save'\n"
+    assert (checkout(tmp_path, repository_id) / "app" / "ui.py").read_text() == "render button with css layout\nlabel = 'Save'\n"
     assert {"edit_file", "create_file", "delete_file"} <= {t["name"] for t in llm.calls[0]["tools"]}
 
 
@@ -436,7 +444,7 @@ def test_the_model_cannot_approve_anything_itself(client, database, monkeypatch,
     body = execute(client, repository_id, headers).json()
 
     assert tool_codes(llm) == ["INVALID_INPUT"] and body["changes"] == []
-    assert (tmp_path / "workspaces" / str(repository_id) / "app" / "ui.py").read_text().endswith("label = 'OK'\n")
+    assert (checkout(tmp_path, repository_id) / "app" / "ui.py").read_text().endswith("label = 'OK'\n")
 
 
 def test_write_tools_do_not_exist_without_a_server_supplied_workspace(client, database, monkeypatch):
@@ -522,8 +530,8 @@ def test_the_model_cannot_direct_a_write_at_another_repository(client, database,
     body = execute(client, repository_id, headers).json()
 
     assert body["changes"][0]["path"] == UI
-    assert not (tmp_path / "workspaces" / str(other_id)).exists()
-    assert "'Save'" in (tmp_path / "workspaces" / str(repository_id) / "app" / "ui.py").read_text()
+    assert not (checkout(tmp_path, other_id)).exists()
+    assert "'Save'" in (checkout(tmp_path, repository_id) / "app" / "ui.py").read_text()
 
 
 # ------------------------------------------------------------------ AGENT
@@ -568,7 +576,7 @@ def test_create_then_edit_the_new_file(client, database, monkeypatch, tmp_path):
 
     assert tool_codes(llm) == [None]
     assert [(c["path"], c["action"]) for c in body["changes"]] == [("app/new.py", "created")]
-    assert (tmp_path / "workspaces" / str(repository_id) / "app" / "new.py").read_text() == "x = 2\n"
+    assert (checkout(tmp_path, repository_id) / "app" / "new.py").read_text() == "x = 2\n"
 
 
 def test_edit_then_delete_different_files(client, database, monkeypatch, tmp_path):
@@ -578,7 +586,7 @@ def test_edit_then_delete_different_files(client, database, monkeypatch, tmp_pat
     body = execute(client, repository_id, headers, files_to_delete=["app/old.py"]).json()
 
     assert sorted((c["path"], c["action"]) for c in body["changes"]) == [("app/old.py", "deleted"), (UI, "modified")]
-    assert not (tmp_path / "workspaces" / str(repository_id) / "app" / "old.py").exists()
+    assert not (checkout(tmp_path, repository_id) / "app" / "old.py").exists()
 
 
 def test_tool_errors_go_back_to_the_model_and_the_run_still_completes(client, database, monkeypatch):
@@ -628,15 +636,18 @@ def test_the_write_operation_limit_reports_limit_reached(client, database, monke
     assert body["metadata"]["write_operations"] == 1
 
 
-def test_each_execution_starts_from_the_indexed_repository(client, database, monkeypatch):
+def test_edits_persist_and_the_next_execution_builds_on_them(client, database, monkeypatch, tmp_path):
     repository_id, headers = create_repository(database, files=FILES)
     use_llm(monkeypatch, FakeLLM(call(*edit()), say("one")))
     execute(client, repository_id, headers)
-    use_llm(monkeypatch, FakeLLM(call(*edit()), say("two")))
+    llm = use_llm(monkeypatch, FakeLLM(call("read_file", {"file_path": UI}), call(*edit(old="'Save'", new="'Done'"), id="b"), say("two")))
 
     body = execute(client, repository_id, headers).json()
 
-    assert body["changes"][0]["additions"] == 1 and body["status"] == "completed"
+    assert "label = 'Save'" in tool_result(llm.calls[1])["output"]["content"]
+    assert tool_result(llm.calls[1])["output"]["source"] == "workspace"
+    assert body["uncommitted_changes"] is True and body["status"] == "completed"
+    assert "label = 'Done'" in (checkout(tmp_path, repository_id) / "app" / "ui.py").read_text()
 
 
 def test_the_index_and_database_are_never_modified(client, database, monkeypatch):
@@ -695,15 +706,20 @@ def test_secrets_and_the_api_key_never_appear_in_the_response(client, database, 
     assert API_KEY not in response.text and "system" not in response.json()
 
 
-def test_sensitive_files_are_not_copied_into_the_workspace(client, database, monkeypatch, tmp_path):
-    files = {**FILES, ".env": [(1, "TOPSECRET=hunter22secret\n")], "keys/server.pem": [(1, "MIIEowIBAAKCAQEA\n")]}
+def test_sensitive_files_in_the_checkout_can_be_neither_read_nor_written(client, database, monkeypatch, tmp_path):
+    files = {**FILES, ".env": [(1, "TOPSECRET=hunter22secret" + chr(10))], "keys/server.pem": [(1, "MIIEowIBAAKCAQEA" + chr(10))]}
     repository_id, headers = create_repository(database, files=files)
-    use_llm(monkeypatch, FakeLLM(say("done")))
+    plan_ = plan(files_to_modify=[UI, ".env", "keys/server.pem"])
+    llm = use_llm(
+        monkeypatch,
+        FakeLLM(calls(("read_file", {"file_path": ".env"}), edit(".env", "TOP", "X"), ("delete_file", {"path": "keys/server.pem"})), say("done")),
+    )
 
-    execute(client, repository_id, headers)
+    response = execute(client, repository_id, headers, body={"message": REQUEST, "plan": plan_, "approved": True})
 
-    root = tmp_path / "workspaces" / str(repository_id)
-    assert sorted(p.name for p in root.rglob("*") if p.is_file()) == ["notes.py", "old.py", "twice.py", "ui.py"]
+    assert tool_codes(llm) == ["FORBIDDEN", "FORBIDDEN", "FORBIDDEN"]
+    assert (checkout(tmp_path, repository_id) / ".env").read_text().startswith("TOPSECRET")
+    assert "hunter22secret" not in response.text and response.json()["changes"] == []
 
 
 def test_nothing_is_written_outside_the_workspace_directory(client, database, monkeypatch, tmp_path):
@@ -714,8 +730,9 @@ def test_nothing_is_written_outside_the_workspace_directory(client, database, mo
     execute(client, repository_id, headers, files_to_create=["app/ok.py"])
 
     assert tool_codes(llm) == ["INVALID_PATH"] * 4
-    assert {p.name for p in tmp_path.iterdir()} == {"workspaces"}
-    assert {p.name for p in (tmp_path / "workspaces").iterdir()} == {str(repository_id)}
+    assert {p.name for p in tmp_path.iterdir()} == {"workspaces", "remotes"}
+    assert {p.name for p in (tmp_path / "workspaces").iterdir()} == {"repositories", "locks"}
+    assert {p.name for p in (tmp_path / "workspaces" / "repositories").iterdir()} == {str(repository_id)}
 
 
 def test_provider_failures_leave_a_clean_error(client, database, monkeypatch):

@@ -2,6 +2,7 @@
 
 import uuid
 from dataclasses import asdict
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -48,6 +49,10 @@ class SearchCodeOutput(BaseModel):
     query: str
     results: list[ContextChunk]
     retrieval: ContextRetrieval
+    source: Literal["last_scan"] = Field(
+        default="last_scan",
+        description="Snippets come from the last repository scan and may not include local edits; use read_file for current content.",
+    )
 
 
 def _search_code(context: ToolContext, arguments: SearchCodeInput) -> SearchCodeOutput:
@@ -76,7 +81,8 @@ SEARCH_CODE = Tool(
         "Search the repository's indexed code. Combines exact text matching (terms extracted from "
         "the query) with semantic search when embeddings are available. Returns snippets with file "
         "path, language, line range, relevance score, and which sources matched. Secrets are "
-        "redacted and sensitive files are never returned."
+        "redacted and sensitive files are never returned. Results reflect the last repository scan and may "
+        "not include local edits made since; use read_file to see a file's current content."
     ),
     input_model=SearchCodeInput,
     handler=_search_code,

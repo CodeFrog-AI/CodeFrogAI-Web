@@ -23,6 +23,7 @@ from app.core.exceptions import ApplicationError
 from app.db.models import Repository, RepositoryFile, User
 from app.embeddings.provider import EmbeddingProvider
 from app.schemas.plan import ImplementationPlan
+from app.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,7 @@ def create_plan(
     *,
     history: Sequence[Mapping[str, str]] = (),
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    checkout: Workspace | None = None,
 ) -> PlanResult:
     """Inspect the repository with the read-only tools and return a validated plan.
 
@@ -118,6 +120,7 @@ def create_plan(
         max_iterations=max_iterations,
         system_prompt=prompt,
         limit_notice=PLANNING_LIMIT_NOTICE,
+        checkout=checkout,
     )
     plan = _redact_plan(parse_plan(result.answer))
     return PlanResult(
