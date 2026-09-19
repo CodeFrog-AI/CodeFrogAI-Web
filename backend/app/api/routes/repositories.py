@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.agent.llm import LLMError, LLMNotConfiguredError, get_llm_provider
+from app.agent.planner import create_plan
 from app.agent.service import run_agent
 from app.analyzer.service import analyze_after_scan, get_repository_analysis
 from app.auth.dependencies import get_current_user
@@ -58,6 +59,7 @@ from app.scanner.service import get_owned_repository, scan_repository
 from app.schemas.availability import ResourceAvailabilityResponse
 from app.schemas.agent import AgentMetadata, AgentRequest, AgentResponse, AgentToolCall
 from app.schemas.context import ContextRequest, RepositoryContextResponse
+from app.schemas.plan import PlanMetadata, PlanResponse
 from app.schemas.repositories import (
     EmbeddingIndexResponse,
     SemanticSearchResponse,
@@ -345,6 +347,44 @@ def ask_agent(
             tool_calls=len(result.tool_calls),
             stop_reason=result.stop_reason,
             model=result.model,
+            duration_ms=result.duration_ms,
+        ),
+    )
+
+
+@router.post("/{repository_id}/agent/plan", response_model=PlanResponse)
+def plan_change(
+    repository_id: uuid.UUID,
+    payload: AgentRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+) -> PlanResponse:
+    """Inspect the repository (read-only) and return a structured implementation plan.
+
+    The plan is only returned: nothing is modified, branched, committed, pushed, or opened.
+    """
+
+    repository = get_owned_repository(session, repository_id, current_user)
+    with _agent_errors():
+        result = create_plan(
+            session,
+            current_user,
+            repository,
+            payload.message,
+            get_llm_provider(),
+            get_embedding_provider,
+            history=[item.model_dump() for item in payload.history],
+            max_iterations=get_settings().agent_max_iterations,
+        )
+    return PlanResponse(
+        repository_id=repository.id,
+        plan=result.plan,
+        warnings=result.warnings,
+        metadata=PlanMetadata(
+            model=result.model,
+            iterations=result.iterations,
+            tool_calls=result.tool_calls,
+            stop_reason=result.stop_reason,
             duration_ms=result.duration_ms,
         ),
     )
