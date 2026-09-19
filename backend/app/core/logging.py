@@ -30,6 +30,8 @@ SENSITIVE_QUERY_PARAMS = frozenset(
         "apikey",
         "key",
         "authorization",
+        "q",
+        "query",
     }
 )
 

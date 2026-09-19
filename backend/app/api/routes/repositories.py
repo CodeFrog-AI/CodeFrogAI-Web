@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
@@ -24,9 +24,17 @@ from app.integrations.github.contents import (
     GitHubNotFoundError,
 )
 from app.integrations.github.tokens import decrypt_access_token
+from app.scanner.search import (
+    DEFAULT_RESULT_LIMIT,
+    MAX_QUERY_LENGTH,
+    MAX_RESULT_LIMIT,
+    search_repository_code,
+)
 from app.scanner.service import get_owned_repository, scan_repository
 from app.schemas.availability import ResourceAvailabilityResponse
 from app.schemas.repositories import (
+    CodeSearchResponse,
+    CodeSearchResult,
     ConnectedRepositoryResponse,
     ConnectRepositoryRequest,
     GitHubRepositoryListResponse,
@@ -147,3 +155,23 @@ def scan_repository_files(
     except GitHubContentError:
         raise BadGatewayError("GitHub request failed. Try again later.") from None
     return RepositoryScanResponse(**vars(summary))
+
+
+@router.get("/{repository_id}/search", response_model=CodeSearchResponse)
+def search_repository(
+    repository_id: uuid.UUID,
+    query: Annotated[str, Query(min_length=1, max_length=MAX_QUERY_LENGTH, pattern=r"\S")],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=MAX_RESULT_LIMIT)] = DEFAULT_RESULT_LIMIT,
+) -> CodeSearchResponse:
+    """Search the indexed code of a repository owned by the caller."""
+
+    repository = get_owned_repository(session, repository_id, current_user)
+    search_text = query.strip()
+    hits = search_repository_code(session, repository, search_text, limit)
+    return CodeSearchResponse(
+        repository_id=repository.id,
+        query=search_text,
+        results=[CodeSearchResult(**vars(hit)) for hit in hits],
+    )
