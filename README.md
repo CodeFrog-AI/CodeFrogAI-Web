@@ -1231,3 +1231,40 @@ python -m pytest backend/tests -q
 
 
 
+
+## Frontend and desktop app
+
+The UI lives in `frontend/` (Next.js + React + TypeScript, Tailwind). The same UI runs in the browser and inside a [Tauri](https://tauri.app) desktop window that talks to the existing FastAPI backend.
+
+### Web UI
+
+```bash
+cd frontend
+npm install
+npm run dev        # http://localhost:3000
+npm run lint
+npm test           # unit tests for the UI state logic (Vitest)
+npm run build      # regular web build
+```
+
+### Desktop app (Tauri)
+
+Prerequisites (one time): the [Rust toolchain](https://rustup.rs), the [Tauri system prerequisites](https://tauri.app/start/prerequisites/) (on Windows: Visual Studio Build Tools with the "Desktop development with C++" workload, and WebView2).
+
+```bash
+cd frontend
+npm install
+npm run desktop:dev     # starts the Next.js dev server and opens the desktop window
+npm run desktop:build   # static export (frontend/out) + installer under frontend/src-tauri/target
+```
+
+`npm run build:desktop` only produces the static export the desktop app loads (`CODEFROG_DESKTOP=1`); the normal `npm run build` is unchanged.
+
+### Current desktop limitations
+
+This phase is the application shell only:
+
+- Repository selection is not connected: "Open Repository" loads sample data, and nothing is read from disk or GitHub.
+- The Agent, Pull Requests, and Settings pages are placeholders; nothing is sent to the backend, and settings are not saved (API keys are never persisted in the browser).
+- The desktop shell has no native filesystem, shell, or Git access and registers no Tauri plugins or commands.
+- `Cargo.lock` is created on the first desktop build; icons are generated placeholders.
