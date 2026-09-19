@@ -1,0 +1,17 @@
+[package]
+name = "codefrog-desktop"
+version = "0.1.0"
+description = "CodeFrog desktop application shell"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "codefrog_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+# No plugins on purpose: no filesystem, shell, or Git access from the UI in this phase.
+[dependencies]
+tauri = { version = "2", features = [] }
