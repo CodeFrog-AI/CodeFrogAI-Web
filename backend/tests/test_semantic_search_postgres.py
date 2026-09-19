@@ -20,6 +20,8 @@ from app.db.models import GitHubAccount, Repository, RepositoryChunk, Repository
 from app.embeddings import EMBEDDING_DIMENSIONS
 from app.scanner.semantic import find_similar_chunks
 from main import app
+from tests.test_repository_scan import FakeGitHubClient, create_repository, scan, use_github
+from tests.test_semantic_search import FakeProvider
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("PGVECTOR_TEST_DATABASE_URL"),
@@ -129,3 +131,48 @@ def test_semantic_search_endpoint_end_to_end_on_postgres(factory, monkeypatch):
         "file_path": "best.py", "language": "python", "start_line": 1, "end_line": 2,
         "snippet": "def github_callback(): ...", "score": 1.0,
     }]
+
+
+def test_scan_automatically_embeds_and_search_works_on_postgres(factory, monkeypatch):
+    files = {
+        "app/github_oauth.py": "def github_callback():\n    exchange oauth token for login\n",
+        "app/database.py": "engine = create_engine()\nsession query connection\n",
+        "app/ui.py": "render button with css layout\n",
+    }
+    repository_id, headers = create_repository(factory)
+    provider = FakeProvider()
+    monkeypatch.setattr(repository_routes, "get_embedding_provider", lambda: provider)
+
+    def override_get_db():
+        session = factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    def semantic(client):
+        response = client.get(f"/api/v1/repositories/{repository_id}/semantic-search",
+                              params={"query": "Where is GitHub authentication handled?"}, headers=headers)
+        assert response.status_code == 200
+        return response.json()["results"]
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app) as client:
+            use_github(monkeypatch, FakeGitHubClient(files))
+            first = scan(client, repository_id, headers).json()
+            assert first["embeddings"]["status"] == "completed"
+            assert first["embeddings"]["chunks_embedded"] == 3
+            results = semantic(client)
+            assert results[0]["file_path"] == "app/github_oauth.py" and results[0]["score"] > 0.5
+
+            calls_before = len(provider.calls)
+            second = scan(client, repository_id, headers).json()
+            assert (second["embeddings"]["chunks_embedded"], second["embeddings"]["chunks_reused"]) == (0, 3)
+            assert len(provider.calls) == calls_before
+
+            use_github(monkeypatch, FakeGitHubClient({k: v for k, v in files.items() if k != "app/github_oauth.py"}))
+            assert scan(client, repository_id, headers).json()["files_removed"] == 1
+            assert "app/github_oauth.py" not in [r["file_path"] for r in semantic(client)]
+    finally:
+        app.dependency_overrides.clear()

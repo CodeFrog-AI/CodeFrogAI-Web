@@ -6,6 +6,20 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class ScanEmbeddingResult(BaseModel):
+    """Outcome of the automatic embedding step run after a scan.
+
+    `failed` and `not_configured` mean the scan itself succeeded but semantic search
+    is not up to date. Counts are None when the step did not complete.
+    """
+
+    status: Literal["completed", "not_configured", "failed"]
+    chunks_embedded: int | None = None
+    chunks_reused: int | None = None
+    chunks_skipped: int | None = None
+    message: str | None = None
+
+
 class RepositoryScanResponse(BaseModel):
     """Outcome of a repository scan. Contains counts only, never GitHub credentials."""
 
@@ -16,6 +30,7 @@ class RepositoryScanResponse(BaseModel):
     files_skipped: int
     files_removed: int
     chunks_created: int
+    embeddings: ScanEmbeddingResult
 
 
 class GitHubRepositoryResponse(BaseModel):
