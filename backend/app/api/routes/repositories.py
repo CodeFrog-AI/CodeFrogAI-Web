@@ -17,7 +17,7 @@ from app.core.exceptions import (
 )
 from app.db.database import get_db
 from app.db.models import GitHubAccount, Repository, User
-from app.embeddings.indexing import index_repository_embeddings
+from app.embeddings.indexing import index_after_scan, index_repository_embeddings
 from app.embeddings.provider import (
     EmbeddingError,
     EmbeddingNotConfiguredError,
@@ -60,6 +60,7 @@ from app.schemas.repositories import (
     GitHubRepositoryListResponse,
     GitHubRepositoryResponse,
     RepositoryScanResponse,
+    ScanEmbeddingResult,
 )
 
 router = APIRouter(prefix="/repositories", tags=["repositories"])
@@ -174,7 +175,14 @@ def scan_repository_files(
         raise NotFoundError("Repository was not found on GitHub or is not accessible") from None
     except GitHubContentError:
         raise BadGatewayError("GitHub request failed. Try again later.") from None
-    return RepositoryScanResponse(**vars(summary))
+    outcome = index_after_scan(session, repository, get_embedding_provider)
+    embedding_counts = vars(outcome.summary) if outcome.summary else {}
+    return RepositoryScanResponse(
+        **vars(summary),
+        embeddings=ScanEmbeddingResult(
+            status=outcome.status, message=outcome.message, **embedding_counts
+        ),
+    )
 
 
 @router.get("/{repository_id}/search", response_model=CodeSearchResponse)

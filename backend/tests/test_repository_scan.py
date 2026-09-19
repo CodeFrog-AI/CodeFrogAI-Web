@@ -27,6 +27,7 @@ from app.integrations.github.contents import (
     GitHubTree,
     GitHubTreeEntry,
 )
+from app.embeddings.provider import EmbeddingNotConfiguredError
 from app.scanner.chunking import chunk_source
 from app.scanner.filters import detect_language
 from main import app
@@ -71,6 +72,16 @@ class FakeGitHubClient:
                 self.downloads.append(path)
                 return content
         raise GitHubNotFoundError("gone")
+
+
+@pytest.fixture(autouse=True)
+def embeddings_not_configured(monkeypatch):
+    """Scan tests never reach a real embedding provider, whatever the local .env holds."""
+
+    def unconfigured():
+        raise EmbeddingNotConfiguredError("not configured")
+
+    monkeypatch.setattr(repository_routes, "get_embedding_provider", unconfigured)
 
 
 @pytest.fixture
@@ -176,6 +187,13 @@ def test_successful_scan_returns_summary(client, database, monkeypatch):
         "files_skipped": 2,
         "files_removed": 0,
         "chunks_created": 2,
+        "embeddings": {
+            "status": "not_configured",
+            "chunks_embedded": None,
+            "chunks_reused": None,
+            "chunks_skipped": None,
+            "message": "Embedding provider is not configured, so semantic search is unavailable.",
+        },
     }
 
 

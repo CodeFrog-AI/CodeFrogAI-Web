@@ -1,12 +1,17 @@
 """Generate and store embeddings for a repository's code chunks."""
 
 import hashlib
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from app.db.models import Repository, RepositoryChunk, RepositoryFile
-from app.embeddings.provider import EmbeddingProvider
+from app.embeddings.provider import EmbeddingError, EmbeddingNotConfiguredError, EmbeddingProvider
+
+logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 64
 MAX_EMBEDDING_INPUT_CHARS = 16_000
@@ -41,9 +46,13 @@ def index_repository_embeddings(
     keeps earlier progress and a re-run continues where it stopped.
     """
 
+    # Vectors are large; only whether one exists is needed to decide on reuse.
     rows = (
-        session.query(RepositoryFile.path, RepositoryChunk)
+        session.query(
+            RepositoryFile.path, RepositoryChunk, RepositoryChunk.embedding.is_not(None)
+        )
         .join(RepositoryChunk, RepositoryChunk.repository_file_id == RepositoryFile.id)
+        .options(defer(RepositoryChunk.embedding))
         .filter(RepositoryFile.repository_id == repository.id)
         .order_by(RepositoryFile.path, RepositoryChunk.chunk_index)
         .all()
@@ -51,16 +60,16 @@ def index_repository_embeddings(
 
     pending: list[tuple[RepositoryChunk, str, str]] = []
     reused = skipped = 0
-    for path, chunk in rows:
+    for path, chunk, has_embedding in rows:
         if not chunk.content.strip():
             skipped += 1
-            if chunk.embedding is not None:
+            if has_embedding:
                 chunk.embedding = None
                 chunk.embedding_content_hash = None
             continue
         text = build_embedding_text(path, chunk.content)
         digest = content_hash(provider.model, text)
-        if chunk.embedding is not None and chunk.embedding_content_hash == digest:
+        if has_embedding and chunk.embedding_content_hash == digest:
             reused += 1
         else:
             pending.append((chunk, text, digest))
@@ -80,3 +89,39 @@ def index_repository_embeddings(
         chunks_reused=reused,
         chunks_skipped=skipped,
     )
+
+
+@dataclass(frozen=True)
+class EmbeddingOutcome:
+    """Result of the embedding step that follows a scan; never raises for provider problems."""
+
+    status: Literal["completed", "not_configured", "failed"]
+    summary: EmbeddingIndexSummary | None = None
+    message: str | None = None
+
+
+def index_after_scan(
+    session: Session, repository: Repository, provider_factory: Callable[[], EmbeddingProvider]
+) -> EmbeddingOutcome:
+    """Bring a freshly scanned repository's embeddings up to date.
+
+    The scan has already been committed, so provider problems are reported in the
+    outcome instead of failing the scan. Batches committed before a failure remain
+    valid, and the next scan or manual run resumes with only the missing chunks.
+    """
+
+    try:
+        summary = index_repository_embeddings(session, repository, provider_factory())
+    except EmbeddingNotConfiguredError:
+        return EmbeddingOutcome(
+            status="not_configured",
+            message="Embedding provider is not configured, so semantic search is unavailable.",
+        )
+    except EmbeddingError as error:
+        session.rollback()
+        logger.warning("Embedding generation failed after scan (exception type=%s)", type(error).__name__)
+        return EmbeddingOutcome(
+            status="failed",
+            message="Embedding generation failed. Scan again or call the embeddings endpoint to retry.",
+        )
+    return EmbeddingOutcome(status="completed", summary=summary)
