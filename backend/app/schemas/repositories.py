@@ -2,9 +2,12 @@
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from app.db.models import RepositoryAnalysis
 
 
 class ScanEmbeddingResult(BaseModel):
@@ -143,3 +146,21 @@ class ProjectAnalysisResponse(BaseModel):
     entry_points: list[EntryPointResponse]
     skipped_manifests: list[SkippedManifestResponse]
     updated_at: datetime
+
+    @classmethod
+    def from_analysis(cls, repository_id: uuid.UUID, analysis: "RepositoryAnalysis") -> "ProjectAnalysisResponse":
+        """Build the response from a stored analysis row."""
+
+        return cls(
+            repository_id=repository_id,
+            status=analysis.status,
+            project_type=analysis.project_type,
+            languages=analysis.languages or [],
+            frameworks=analysis.frameworks or [],
+            package_managers=analysis.package_managers or [],
+            dependencies=analysis.dependencies or [],
+            important_files=analysis.important_files or [],
+            entry_points=analysis.entry_points or [],
+            skipped_manifests=(analysis.analysis_metadata or {}).get("manifests_skipped", []),
+            updated_at=analysis.updated_at,
+        )

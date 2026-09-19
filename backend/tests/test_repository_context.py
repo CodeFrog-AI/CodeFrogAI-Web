@@ -231,6 +231,15 @@ def test_redaction_stays_fast_on_crafted_dotted_and_hyphenated_identifiers(text)
     assert time.perf_counter() - started < 0.5
 
 
+def test_url_credential_redaction_stays_linear_on_long_scheme_like_runs():
+    # `+` is valid in a URL scheme but not in an identifier, so this input isolates the URL rule.
+    # read_file passes up to 16,000 characters; the unbounded scheme quantifier took ~4s here.
+    started = time.perf_counter()
+    redact_secrets("a+" * 10_000)
+
+    assert time.perf_counter() - started < 0.5
+
+
 def test_pem_private_keys_are_redacted_including_partial_ones_and_keep_line_count():
     full = "a = 1\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAxK7abcdefgh\nqrstuvwxyz0123456789ABCD\n-----END RSA PRIVATE KEY-----\nb = 2"
     cut_at_end = "x\n-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nKcwggSjAgEAAoIBAQC7abcdefghijkl"

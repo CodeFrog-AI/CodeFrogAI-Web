@@ -109,7 +109,7 @@ _RULES: tuple[Rule, ...] = (
     _pattern_rule(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}", REDACTION),
     _pattern_rule(r"(\bBearer\s+)[A-Za-z0-9._~+/=-]{16,}", rf"\1{REDACTION}", re.I),
     # The username may be empty: `redis://:password@host`.
-    _pattern_rule(r"(\b[a-z][a-z0-9+.-]*://[^\s/:@]*:)[^\s/@]{3,}(@)", rf"\1{REDACTION}\2", re.I),
+    _pattern_rule(r"(\b[a-z][a-z0-9+.-]{0,31}://[^\s/:@]*:)[^\s/@]{3,}(@)", rf"\1{REDACTION}\2", re.I),
     _quoted_assignment,
     _unquoted_assignment,
 )
