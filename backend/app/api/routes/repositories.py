@@ -8,10 +8,23 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
+from app.analyzer.service import analyze_after_scan, get_repository_analysis
 from app.auth.dependencies import get_current_user
-from app.core.exceptions import BadGatewayError, ForbiddenError, NotFoundError
+from app.core.exceptions import (
+    BadGatewayError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    ServiceUnavailableError,
+)
 from app.db.database import get_db
 from app.db.models import GitHubAccount, Repository, User
+from app.embeddings.indexing import index_after_scan, index_repository_embeddings
+from app.embeddings.provider import (
+    EmbeddingError,
+    EmbeddingNotConfiguredError,
+    get_embedding_provider,
+)
 from app.integrations.github.connection import (
     connect_repository,
     connected_repository_ids,
@@ -30,16 +43,27 @@ from app.scanner.search import (
     MAX_RESULT_LIMIT,
     search_repository_code,
 )
+from app.scanner.semantic import (
+    DEFAULT_SEMANTIC_LIMIT,
+    MAX_SEMANTIC_LIMIT,
+    MAX_SEMANTIC_QUERY_LENGTH,
+    semantic_search,
+)
 from app.scanner.service import get_owned_repository, scan_repository
 from app.schemas.availability import ResourceAvailabilityResponse
 from app.schemas.repositories import (
+    EmbeddingIndexResponse,
+    SemanticSearchResponse,
+    SemanticSearchResult,
     CodeSearchResponse,
     CodeSearchResult,
     ConnectedRepositoryResponse,
+    ProjectAnalysisResponse,
     ConnectRepositoryRequest,
     GitHubRepositoryListResponse,
     GitHubRepositoryResponse,
     RepositoryScanResponse,
+    ScanEmbeddingResult,
 )
 
 router = APIRouter(prefix="/repositories", tags=["repositories"])
@@ -146,6 +170,7 @@ def scan_repository_files(
         token = decrypt_access_token(repository.github_account.access_token_encrypted)
         with GitHubContentClient(token) as client:
             summary = scan_repository(session, repository, client)
+            analyze_after_scan(session, repository, client)
     except GitHubAuthError:
         raise ForbiddenError(
             "GitHub access could not be verified. Reconnect GitHub and try again."
@@ -154,7 +179,14 @@ def scan_repository_files(
         raise NotFoundError("Repository was not found on GitHub or is not accessible") from None
     except GitHubContentError:
         raise BadGatewayError("GitHub request failed. Try again later.") from None
-    return RepositoryScanResponse(**vars(summary))
+    outcome = index_after_scan(session, repository, get_embedding_provider)
+    embedding_counts = vars(outcome.summary) if outcome.summary else {}
+    return RepositoryScanResponse(
+        **vars(summary),
+        embeddings=ScanEmbeddingResult(
+            status=outcome.status, message=outcome.message, **embedding_counts
+        ),
+    )
 
 
 @router.get("/{repository_id}/search", response_model=CodeSearchResponse)
@@ -174,4 +206,83 @@ def search_repository(
         repository_id=repository.id,
         query=search_text,
         results=[CodeSearchResult(**vars(hit)) for hit in hits],
+    )
+
+
+@contextmanager
+def _embedding_errors() -> Iterator[None]:
+    """Translate embedding provider failures into safe, client-facing API errors."""
+
+    try:
+        yield
+    except EmbeddingNotConfiguredError:
+        raise ServiceUnavailableError("Semantic search is not configured") from None
+    except EmbeddingError:
+        raise BadGatewayError("Embedding provider request failed. Try again later.") from None
+
+
+@router.post("/{repository_id}/embeddings", response_model=EmbeddingIndexResponse)
+def index_repository_chunk_embeddings(
+    repository_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+) -> EmbeddingIndexResponse:
+    """Generate embeddings for new or changed chunks of a repository owned by the caller."""
+
+    repository = get_owned_repository(session, repository_id, current_user)
+    with _embedding_errors():
+        summary = index_repository_embeddings(session, repository, get_embedding_provider())
+    return EmbeddingIndexResponse(
+        repository_id=repository.id, status="completed", **vars(summary)
+    )
+
+
+@router.get("/{repository_id}/semantic-search", response_model=SemanticSearchResponse)
+def semantic_search_repository(
+    repository_id: uuid.UUID,
+    query: Annotated[str, Query(min_length=1, max_length=MAX_SEMANTIC_QUERY_LENGTH, pattern=r"\S")],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=MAX_SEMANTIC_LIMIT)] = DEFAULT_SEMANTIC_LIMIT,
+    min_score: Annotated[float | None, Query(ge=-1, le=1)] = None,
+) -> SemanticSearchResponse:
+    """Find code chunks semantically related to a natural-language query."""
+
+    repository = get_owned_repository(session, repository_id, current_user)
+    search_text = query.strip()
+    with _embedding_errors():
+        hits = semantic_search(
+            session, repository, get_embedding_provider(), search_text, limit, min_score
+        )
+    return SemanticSearchResponse(
+        repository_id=repository.id,
+        query=search_text,
+        results=[SemanticSearchResult(**vars(hit)) for hit in hits],
+    )
+
+
+@router.get("/{repository_id}/analysis", response_model=ProjectAnalysisResponse)
+def get_project_analysis(
+    repository_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+) -> ProjectAnalysisResponse:
+    """Return the stored project analysis of a repository owned by the caller."""
+
+    repository = get_owned_repository(session, repository_id, current_user)
+    analysis = get_repository_analysis(session, repository)
+    if analysis is None:
+        raise ConflictError("Repository has not been analyzed yet. Scan the repository first.")
+    return ProjectAnalysisResponse(
+        repository_id=repository.id,
+        status=analysis.status,
+        project_type=analysis.project_type,
+        languages=analysis.languages or [],
+        frameworks=analysis.frameworks or [],
+        package_managers=analysis.package_managers or [],
+        dependencies=analysis.dependencies or [],
+        important_files=analysis.important_files or [],
+        entry_points=analysis.entry_points or [],
+        skipped_manifests=(analysis.analysis_metadata or {}).get("manifests_skipped", []),
+        updated_at=analysis.updated_at,
     )

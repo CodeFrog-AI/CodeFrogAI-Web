@@ -1,9 +1,24 @@
 """Response schemas for repository operations."""
 
 import uuid
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+
+class ScanEmbeddingResult(BaseModel):
+    """Outcome of the automatic embedding step run after a scan.
+
+    `failed` and `not_configured` mean the scan itself succeeded but semantic search
+    is not up to date. Counts are None when the step did not complete.
+    """
+
+    status: Literal["completed", "not_configured", "failed"]
+    chunks_embedded: int | None = None
+    chunks_reused: int | None = None
+    chunks_skipped: int | None = None
+    message: str | None = None
 
 
 class RepositoryScanResponse(BaseModel):
@@ -16,6 +31,7 @@ class RepositoryScanResponse(BaseModel):
     files_skipped: int
     files_removed: int
     chunks_created: int
+    embeddings: ScanEmbeddingResult
 
 
 class GitHubRepositoryResponse(BaseModel):
@@ -64,3 +80,66 @@ class CodeSearchResponse(BaseModel):
     repository_id: uuid.UUID
     query: str
     results: list[CodeSearchResult]
+
+
+class EmbeddingIndexResponse(BaseModel):
+    """Outcome of embedding a repository's chunks. Counts only; never vectors or keys."""
+
+    repository_id: uuid.UUID
+    status: Literal["completed"]
+    chunks_total: int
+    chunks_embedded: int
+    chunks_reused: int
+    chunks_skipped: int
+
+
+class SemanticSearchResult(BaseModel):
+    file_path: str
+    language: str | None
+    start_line: int
+    end_line: int
+    snippet: str
+    score: float = Field(description="Cosine similarity in [-1, 1]; higher means more relevant.")
+
+
+class SemanticSearchResponse(BaseModel):
+    repository_id: uuid.UUID
+    query: str
+    results: list[SemanticSearchResult]
+
+
+class DependencyResponse(BaseModel):
+    name: str
+    ecosystem: str
+    dev: bool
+
+
+class EntryPointResponse(BaseModel):
+    kind: str
+    name: str
+    path: str
+
+
+class SkippedManifestResponse(BaseModel):
+    path: str
+    reason: str
+
+
+class ProjectAnalysisResponse(BaseModel):
+    """Static project analysis. Contains detected facts only, never file contents or secrets.
+
+    `partial` means some manifests were skipped (see `skipped_manifests`); `failed` means
+    the last analysis attempt failed and the data shown, if any, may be stale.
+    """
+
+    repository_id: uuid.UUID
+    status: Literal["completed", "partial", "failed"]
+    project_type: str
+    languages: list[str]
+    frameworks: list[str]
+    package_managers: list[str]
+    dependencies: list[DependencyResponse]
+    important_files: list[str]
+    entry_points: list[EntryPointResponse]
+    skipped_manifests: list[SkippedManifestResponse]
+    updated_at: datetime

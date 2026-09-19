@@ -1,7 +1,7 @@
 """Core persistent entities and their relationships.
 
-These models intentionally describe storage only. Integrations, agent execution,
-and vector embeddings are introduced by later roadmap features.
+These models intentionally describe storage only. Integrations and agent execution
+are introduced by later roadmap features.
 """
 
 import uuid
@@ -20,10 +20,12 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.embeddings import EMBEDDING_DIMENSIONS
 
 
 class TimestampMixin:
@@ -91,8 +93,39 @@ class Repository(TimestampMixin, Base):
     files: Mapped[list["RepositoryFile"]] = relationship(
         back_populates="repository", cascade="all, delete-orphan"
     )
+    analysis: Mapped["RepositoryAnalysis | None"] = relationship(
+        back_populates="repository", cascade="all, delete-orphan", uselist=False
+    )
     agent_tasks: Mapped[list["AgentTask"]] = relationship(back_populates="repository")
     pull_requests: Mapped[list["PullRequest"]] = relationship(back_populates="repository")
+
+
+class RepositoryAnalysis(TimestampMixin, Base):
+    """Static project analysis of one repository (one row per repository, updated on re-scan)."""
+
+    __tablename__ = "repository_analyses"
+    __table_args__ = (
+        UniqueConstraint("repository_id", name="uq_repository_analyses_repository_id"),
+        CheckConstraint(
+            "status IN ('completed', 'partial', 'failed')", name="ck_repository_analyses_status"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    repository_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(32), default="completed", nullable=False)
+    project_type: Mapped[str] = mapped_column(String(64), default="unknown", nullable=False)
+    languages: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    frameworks: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    package_managers: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    dependencies: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    important_files: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    entry_points: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    analysis_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+    repository: Mapped[Repository] = relationship(back_populates="analysis")
 
 
 class RepositoryFile(TimestampMixin, Base):
@@ -130,6 +163,9 @@ class RepositoryChunk(TimestampMixin, Base):
     start_line: Mapped[int] = mapped_column(Integer, nullable=False)
     end_line: Mapped[int] = mapped_column(Integer, nullable=False)
     context_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
+    # SHA-256 of the exact text (and model) the embedding was generated from.
+    embedding_content_hash: Mapped[str | None] = mapped_column(String(64))
 
     repository_file: Mapped[RepositoryFile] = relationship(back_populates="chunks")
 

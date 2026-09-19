@@ -49,3 +49,9 @@ class BadGatewayError(ApplicationError):
     status_code = 502
     code = "BAD_GATEWAY"
     message = "An upstream service request failed"
+
+
+class ServiceUnavailableError(ApplicationError):
+    status_code = 503
+    code = "SERVICE_UNAVAILABLE"
+    message = "The service is temporarily unavailable"

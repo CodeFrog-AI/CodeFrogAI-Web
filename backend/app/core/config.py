@@ -52,6 +52,9 @@ class Settings(DatabaseSettings):
     github_client_secret: SecretStr = Field(min_length=1)
     github_redirect_uri: HttpUrl
     token_encryption_key: SecretStr | None = None
+    embedding_api_key: SecretStr | None = None
+    embedding_model: str = "text-embedding-3-small"
+    embedding_base_url: str = "https://api.openai.com/v1"
 
     @field_validator("app_env", mode="before")
     @classmethod
