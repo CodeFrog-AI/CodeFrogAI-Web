@@ -8,9 +8,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
+from app.analyzer.service import analyze_after_scan, get_repository_analysis
 from app.auth.dependencies import get_current_user
 from app.core.exceptions import (
     BadGatewayError,
+    ConflictError,
     ForbiddenError,
     NotFoundError,
     ServiceUnavailableError,
@@ -56,6 +58,7 @@ from app.schemas.repositories import (
     CodeSearchResponse,
     CodeSearchResult,
     ConnectedRepositoryResponse,
+    ProjectAnalysisResponse,
     ConnectRepositoryRequest,
     GitHubRepositoryListResponse,
     GitHubRepositoryResponse,
@@ -167,6 +170,7 @@ def scan_repository_files(
         token = decrypt_access_token(repository.github_account.access_token_encrypted)
         with GitHubContentClient(token) as client:
             summary = scan_repository(session, repository, client)
+            analyze_after_scan(session, repository, client)
     except GitHubAuthError:
         raise ForbiddenError(
             "GitHub access could not be verified. Reconnect GitHub and try again."
@@ -254,4 +258,31 @@ def semantic_search_repository(
         repository_id=repository.id,
         query=search_text,
         results=[SemanticSearchResult(**vars(hit)) for hit in hits],
+    )
+
+
+@router.get("/{repository_id}/analysis", response_model=ProjectAnalysisResponse)
+def get_project_analysis(
+    repository_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+) -> ProjectAnalysisResponse:
+    """Return the stored project analysis of a repository owned by the caller."""
+
+    repository = get_owned_repository(session, repository_id, current_user)
+    analysis = get_repository_analysis(session, repository)
+    if analysis is None:
+        raise ConflictError("Repository has not been analyzed yet. Scan the repository first.")
+    return ProjectAnalysisResponse(
+        repository_id=repository.id,
+        status=analysis.status,
+        project_type=analysis.project_type,
+        languages=analysis.languages or [],
+        frameworks=analysis.frameworks or [],
+        package_managers=analysis.package_managers or [],
+        dependencies=analysis.dependencies or [],
+        important_files=analysis.important_files or [],
+        entry_points=analysis.entry_points or [],
+        skipped_manifests=(analysis.analysis_metadata or {}).get("manifests_skipped", []),
+        updated_at=analysis.updated_at,
     )

@@ -1,6 +1,7 @@
 """Response schemas for repository operations."""
 
 import uuid
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -105,3 +106,40 @@ class SemanticSearchResponse(BaseModel):
     repository_id: uuid.UUID
     query: str
     results: list[SemanticSearchResult]
+
+
+class DependencyResponse(BaseModel):
+    name: str
+    ecosystem: str
+    dev: bool
+
+
+class EntryPointResponse(BaseModel):
+    kind: str
+    name: str
+    path: str
+
+
+class SkippedManifestResponse(BaseModel):
+    path: str
+    reason: str
+
+
+class ProjectAnalysisResponse(BaseModel):
+    """Static project analysis. Contains detected facts only, never file contents or secrets.
+
+    `partial` means some manifests were skipped (see `skipped_manifests`); `failed` means
+    the last analysis attempt failed and the data shown, if any, may be stale.
+    """
+
+    repository_id: uuid.UUID
+    status: Literal["completed", "partial", "failed"]
+    project_type: str
+    languages: list[str]
+    frameworks: list[str]
+    package_managers: list[str]
+    dependencies: list[DependencyResponse]
+    important_files: list[str]
+    entry_points: list[EntryPointResponse]
+    skipped_manifests: list[SkippedManifestResponse]
+    updated_at: datetime

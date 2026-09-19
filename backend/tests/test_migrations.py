@@ -20,6 +20,6 @@ def test_initial_migration_is_registered():
     config = Config(str(BACKEND_DIRECTORY / "alembic.ini"))
     revisions = list(ScriptDirectory.from_config(config).walk_revisions())
 
-    assert len(revisions) == 3
+    assert len(revisions) == 4
     assert revisions[-1].down_revision is None
-    assert revisions[0].revision == "c4d8e1f6a2b9"
+    assert revisions[0].revision == "d5e9f2a7b3c1"
