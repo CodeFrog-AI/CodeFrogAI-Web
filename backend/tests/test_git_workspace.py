@@ -952,9 +952,16 @@ def test_git_is_started_only_from_the_runner_and_never_through_a_shell():
     assert offenders == []
 
 
-def test_no_pull_request_code_exists():
-    offenders = [p.name for p in python_files() if re.search(r"create_pull|/pulls\b|pulls\.create|gh pr", p.read_text(encoding="utf-8"))]
+def test_pull_request_api_calls_exist_only_in_the_pull_request_client():
+    allowed = {"integrations/github/pull_requests.py"}
+    offenders = [
+        p.relative_to(APP).as_posix()
+        for p in python_files()
+        if re.search(r"/pulls(?![a-z])|gh pr", p.read_text(encoding="utf-8")) and p.relative_to(APP).as_posix() not in allowed
+    ]
     assert offenders == []
+    for folder in ("git", "workspace", "tools", "agent"):  # Git, workspace, tools, and agents never create pull requests
+        assert not [p.name for p in (APP / folder).glob("*.py") if re.search(r"create_pull|pulls[.]create", p.read_text(encoding="utf-8"))]
 
 
 def test_every_git_command_is_an_argument_list_in_the_workspace_with_the_token_only_in_the_environment(ready, monkeypatch):
