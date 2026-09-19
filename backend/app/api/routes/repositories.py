@@ -3,6 +3,7 @@
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import asdict
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.analyzer.service import analyze_after_scan, get_repository_analysis
 from app.auth.dependencies import get_current_user
+from app.context.service import build_repository_context
 from app.core.exceptions import (
     BadGatewayError,
     ConflictError,
@@ -51,6 +53,7 @@ from app.scanner.semantic import (
 )
 from app.scanner.service import get_owned_repository, scan_repository
 from app.schemas.availability import ResourceAvailabilityResponse
+from app.schemas.context import ContextRequest, RepositoryContextResponse
 from app.schemas.repositories import (
     EmbeddingIndexResponse,
     SemanticSearchResponse,
@@ -286,3 +289,23 @@ def get_project_analysis(
         skipped_manifests=(analysis.analysis_metadata or {}).get("manifests_skipped", []),
         updated_at=analysis.updated_at,
     )
+
+
+@router.post("/{repository_id}/context", response_model=RepositoryContextResponse)
+def build_context(
+    repository_id: uuid.UUID,
+    payload: ContextRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+) -> RepositoryContextResponse:
+    """Build sanitized, AI-ready context (analysis, exact and semantic hits) for a question.
+
+    Semantic search is optional: when embeddings are missing, unconfigured, or failing,
+    the response still succeeds and reports the semantic status in `retrieval`.
+    """
+
+    repository = get_owned_repository(session, repository_id, current_user)
+    context = build_repository_context(
+        session, repository, get_embedding_provider, **payload.model_dump()
+    )
+    return RepositoryContextResponse.model_validate(asdict(context))

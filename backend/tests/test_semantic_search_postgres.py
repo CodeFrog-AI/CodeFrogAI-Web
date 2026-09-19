@@ -176,3 +176,42 @@ def test_scan_automatically_embeds_and_search_works_on_postgres(factory, monkeyp
             assert "app/github_oauth.py" not in [r["file_path"] for r in semantic(client)]
     finally:
         app.dependency_overrides.clear()
+
+
+def test_context_endpoint_fuses_exact_and_semantic_on_postgres(factory, monkeypatch):
+    files = {
+        "app/github_oauth.py": "def github_callback():\n    exchange oauth token for login\n    return session\n",
+        "app/database.py": "engine = create_engine()\nsession query connection\n",
+        "requirements.txt": "fastapi>=0.115\n",
+    }
+    repository_id, headers = create_repository(factory)
+    monkeypatch.setattr(repository_routes, "get_embedding_provider", lambda: FakeProvider())
+
+    def override_get_db():
+        session = factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app) as client:
+            use_github(monkeypatch, FakeGitHubClient(files))
+            assert scan(client, repository_id, headers).status_code == 200
+            response = client.post(
+                f"/api/v1/repositories/{repository_id}/context",
+                json={"question": "Where is GitHub authentication handled?"},
+                headers=headers,
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    top = body["relevant_chunks"][0]
+    assert top["file_path"] == "app/github_oauth.py" and top["sources"] == ["exact", "semantic"]
+    assert top["matched_terms"] == ["GitHub"]
+    assert body["retrieval"]["semantic"]["status"] == "used"
+    assert body["project"]["frameworks"] == ["FastAPI"] and body["project"]["layout"] == [{"path": "app/", "files": 2}]
+    assert '"embedding"' not in response.text
