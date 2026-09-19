@@ -64,3 +64,29 @@ class CodeSearchResponse(BaseModel):
     repository_id: uuid.UUID
     query: str
     results: list[CodeSearchResult]
+
+
+class EmbeddingIndexResponse(BaseModel):
+    """Outcome of embedding a repository's chunks. Counts only; never vectors or keys."""
+
+    repository_id: uuid.UUID
+    status: Literal["completed"]
+    chunks_total: int
+    chunks_embedded: int
+    chunks_reused: int
+    chunks_skipped: int
+
+
+class SemanticSearchResult(BaseModel):
+    file_path: str
+    language: str | None
+    start_line: int
+    end_line: int
+    snippet: str
+    score: float = Field(description="Cosine similarity in [-1, 1]; higher means more relevant.")
+
+
+class SemanticSearchResponse(BaseModel):
+    repository_id: uuid.UUID
+    query: str
+    results: list[SemanticSearchResult]

@@ -1,7 +1,7 @@
 """Core persistent entities and their relationships.
 
-These models intentionally describe storage only. Integrations, agent execution,
-and vector embeddings are introduced by later roadmap features.
+These models intentionally describe storage only. Integrations and agent execution
+are introduced by later roadmap features.
 """
 
 import uuid
@@ -20,10 +20,12 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.embeddings import EMBEDDING_DIMENSIONS
 
 
 class TimestampMixin:
@@ -130,6 +132,9 @@ class RepositoryChunk(TimestampMixin, Base):
     start_line: Mapped[int] = mapped_column(Integer, nullable=False)
     end_line: Mapped[int] = mapped_column(Integer, nullable=False)
     context_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
+    # SHA-256 of the exact text (and model) the embedding was generated from.
+    embedding_content_hash: Mapped[str | None] = mapped_column(String(64))
 
     repository_file: Mapped[RepositoryFile] = relationship(back_populates="chunks")
 
