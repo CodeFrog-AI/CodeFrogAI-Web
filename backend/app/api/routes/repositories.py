@@ -276,19 +276,7 @@ def get_project_analysis(
     analysis = get_repository_analysis(session, repository)
     if analysis is None:
         raise ConflictError("Repository has not been analyzed yet. Scan the repository first.")
-    return ProjectAnalysisResponse(
-        repository_id=repository.id,
-        status=analysis.status,
-        project_type=analysis.project_type,
-        languages=analysis.languages or [],
-        frameworks=analysis.frameworks or [],
-        package_managers=analysis.package_managers or [],
-        dependencies=analysis.dependencies or [],
-        important_files=analysis.important_files or [],
-        entry_points=analysis.entry_points or [],
-        skipped_manifests=(analysis.analysis_metadata or {}).get("manifests_skipped", []),
-        updated_at=analysis.updated_at,
-    )
+    return ProjectAnalysisResponse.from_analysis(repository.id, analysis)
 
 
 @router.post("/{repository_id}/context", response_model=RepositoryContextResponse)
