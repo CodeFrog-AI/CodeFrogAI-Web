@@ -51,6 +51,7 @@ class Settings(DatabaseSettings):
     github_client_id: str = Field(min_length=1)
     github_client_secret: SecretStr = Field(min_length=1)
     github_redirect_uri: HttpUrl
+    token_encryption_key: SecretStr | None = None
 
     @field_validator("app_env", mode="before")
     @classmethod
