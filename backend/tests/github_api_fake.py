@@ -12,7 +12,7 @@ RAW_BODY_MARKER = "RAW-GITHUB-BODY-MUST-NOT-LEAK"
 _REPO = r"/repos/(?P<owner>[^/]+)/(?P<name>[^/]+)"
 
 
-def pr_json(number, *, title="A change", body="", head="codefrog/task-1", base="main", state="open", merged=False, owner="me", name="project", draft=False):
+def pr_json(number, *, title="A change", body="", head="codefrog/task-1", base="main", state="open", merged=False, owner="me", name="project", draft=False, sha="a" * 40):
     return {
         "number": number,
         "html_url": f"https://github.com/{owner}/{name}/pull/{number}",
@@ -21,7 +21,7 @@ def pr_json(number, *, title="A change", body="", head="codefrog/task-1", base="
         "state": state,
         "merged": merged,
         "draft": draft,
-        "head": {"ref": head},
+        "head": {"ref": head, "sha": sha, "repo": {"full_name": f"{owner}/{name}"}},
         "base": {"ref": base},
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-02T00:00:00Z",

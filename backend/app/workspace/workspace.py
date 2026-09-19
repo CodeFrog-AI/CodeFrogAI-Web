@@ -134,6 +134,7 @@ class Workspace:
         self.write_operations = 0
         self.bytes_changed = 0
         self.limit_reached = False
+        self.scope_violations = 0  # writes refused because the file is outside the approved plan
         self._originals: dict[str, str | None] = {}
 
     @classmethod
@@ -248,6 +249,7 @@ class Workspace:
             "delete": self.scope.delete,
         }[action]
         if relative not in allowed:
+            self.scope_violations += 1
             raise WorkspaceError("NOT_IN_APPROVED_PLAN", "That file is not part of the approved plan.")
         return relative, self._locate(relative)
 

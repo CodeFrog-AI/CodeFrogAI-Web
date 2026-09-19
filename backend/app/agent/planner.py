@@ -102,6 +102,7 @@ def create_plan(
     history: Sequence[Mapping[str, str]] = (),
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     checkout: Workspace | None = None,
+    extra_instructions: str = "",
 ) -> PlanResult:
     """Inspect the repository with the read-only tools and return a validated plan.
 
@@ -109,6 +110,8 @@ def create_plan(
     """
 
     prompt = PLANNING_SYSTEM_PROMPT.replace("{owner}", repository.owner).replace("{name}", repository.name)
+    if extra_instructions:
+        prompt = prompt + "\n\n" + extra_instructions
     result = run_agent(
         session,
         user,

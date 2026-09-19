@@ -947,8 +947,8 @@ def test_git_is_started_only_from_the_runner_and_never_through_a_shell():
         for pattern in (r"shell\s*=\s*True", r"os\.system", r"os\.popen", r"\bPopen\b", r"\bpexpect\b", r"asyncio\.create_subprocess"):
             if re.search(pattern, text):
                 offenders.append(f"{relative}: {pattern}")
-        if re.search(r"\bsubprocess\b", text) and relative != "git/runner.py":
-            offenders.append(f"{relative}: subprocess outside the runner")
+        if re.search(r"\bsubprocess\b", text) and relative not in ("git/runner.py", "testrunner/runner.py"):
+            offenders.append(f"{relative}: subprocess outside the two runners")
     assert offenders == []
 
 

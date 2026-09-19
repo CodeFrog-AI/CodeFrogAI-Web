@@ -63,6 +63,7 @@ class ExecutionResult:
     write_operations: int
     model: str
     duration_ms: int
+    scope_violations: int = 0
 
 
 def execute_plan(
@@ -77,6 +78,7 @@ def execute_plan(
     workspace_root: Path,
     history: Sequence[Mapping[str, str]] = (),
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    extra_instructions: str = "",
 ) -> ExecutionResult:
     """Run the agent with write tools against the persistent checkout and return this run's net changes.
 
@@ -84,30 +86,55 @@ def execute_plan(
     repository raises `ConflictError`; a missing GitHub connection raises `GitError`.
     """
 
+    with exclusive_workspace(workspace_root, repository.id):
+        return execute_plan_locked(
+            session, user, repository, message, plan, provider, embedding_provider_factory,
+            workspace_root=workspace_root, history=history, max_iterations=max_iterations,
+            extra_instructions=extra_instructions,
+        )
+
+
+def execute_plan_locked(
+    session: Session,
+    user: User,
+    repository: Repository,
+    message: str,
+    plan: ImplementationPlan,
+    provider: LLMProvider,
+    embedding_provider_factory: Callable[[], EmbeddingProvider],
+    *,
+    workspace_root: Path,
+    history: Sequence[Mapping[str, str]] = (),
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    extra_instructions: str = "",
+) -> ExecutionResult:
+    """`execute_plan` for a caller that already holds the repository's workspace lock and has checked its own preconditions."""
+
     started = time.perf_counter()
     prompt = (
         EXECUTION_SYSTEM_PROMPT.replace("{plan}", redact_secrets(plan.model_dump_json(indent=1))[0])
         .replace("{owner}", repository.owner)
         .replace("{name}", repository.name)
     )
-    with exclusive_workspace(workspace_root, repository.id):
-        root = workspace_service.ensure_workspace(workspace_root, repository)
-        workspace = Workspace.attach(root, repository.id, WriteScope.from_plan(plan))
-        result = run_agent(
-            session,
-            user,
-            repository,
-            message,
-            provider,
-            embedding_provider_factory,
-            history=history,
-            max_iterations=max_iterations,
-            system_prompt=prompt,
-            limit_notice=EXECUTION_LIMIT_NOTICE,
-            workspace=workspace,
-        )
-        changes = workspace.changes()
-        state = workspace_service.get_state(workspace_root, repository)
+    if extra_instructions:
+        prompt = prompt + "\n\n" + extra_instructions
+    root = workspace_service.ensure_workspace(workspace_root, repository)
+    workspace = Workspace.attach(root, repository.id, WriteScope.from_plan(plan))
+    result = run_agent(
+        session,
+        user,
+        repository,
+        message,
+        provider,
+        embedding_provider_factory,
+        history=history,
+        max_iterations=max_iterations,
+        system_prompt=prompt,
+        limit_notice=EXECUTION_LIMIT_NOTICE,
+        workspace=workspace,
+    )
+    changes = workspace.changes()
+    state = workspace_service.get_state(workspace_root, repository)
 
     if workspace.limit_reached:
         status = "limit_reached"
@@ -130,4 +157,5 @@ def execute_plan(
         write_operations=workspace.write_operations,
         model=result.model,
         duration_ms=round((time.perf_counter() - started) * 1000),
+        scope_violations=workspace.scope_violations,
     )

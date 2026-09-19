@@ -52,6 +52,8 @@ class PullRequest:
     draft: bool
     created_at: str | None
     updated_at: str | None
+    head_sha: str = ""
+    head_repo: str | None = None  # owner/name of the head repository (a fork differs from the base)
 
 
 @dataclass(frozen=True)
@@ -187,6 +189,8 @@ def _parse_pull_request(item: Any) -> PullRequest:
             draft=bool(item.get("draft", False)),
             created_at=item.get("created_at"),
             updated_at=item.get("updated_at"),
+            head_sha=str(item["head"].get("sha") or ""),
+            head_repo=(item["head"].get("repo") or {}).get("full_name"),
         )
     except (KeyError, TypeError, ValueError, AttributeError):
         raise GitHubContentError("GitHub returned an invalid response") from None

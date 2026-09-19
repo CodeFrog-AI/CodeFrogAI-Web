@@ -160,5 +160,9 @@ class ReviewResponse(BaseModel):
     pull_request_number: int
     review: PullRequestReview
     warnings: list[str]
+    head_sha: str = Field(description="The pull request head commit that was reviewed.")
+    finding_signatures: list[str] = Field(
+        description="One signature per finding, in order. Send a finding back with its signature and head_sha to fix it."
+    )
     changes_made: Literal[False] = False
     metadata: ReviewMetadata
