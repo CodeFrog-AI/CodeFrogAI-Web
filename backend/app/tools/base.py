@@ -40,12 +40,15 @@ class ToolContext:
 
     `workspace` is set only by the server, after the user has approved a plan. Without it,
     write tools refuse to run: approval is a property of the context, never of model input.
+    `checkout` is a read-only view of the repository's local checkout (if one exists): it lets
+    read_file show current local content but never enables writes.
     """
 
     session: Session
     user: User | None
     embedding_provider_factory: Callable[[], EmbeddingProvider] = get_embedding_provider
     workspace: "Workspace | None" = None
+    checkout: "Workspace | None" = None
 
 
 @dataclass(frozen=True)

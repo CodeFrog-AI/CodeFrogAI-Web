@@ -58,6 +58,7 @@ from app.scanner.semantic import (
 )
 from app.scanner.service import get_owned_repository, scan_repository
 from app.workspace import get_workspace_root
+from app.workspace import service as workspace_service
 from app.schemas.availability import ResourceAvailabilityResponse
 from app.schemas.agent import AgentMetadata, AgentRequest, AgentResponse, AgentToolCall
 from app.schemas.context import ContextRequest, RepositoryContextResponse
@@ -340,6 +341,7 @@ def ask_agent(
             get_embedding_provider,
             history=[item.model_dump() for item in payload.history],
             max_iterations=get_settings().agent_max_iterations,
+            checkout=workspace_service.open_checkout(get_workspace_root(), repository),
         )
     return AgentResponse(
         repository_id=repository.id,
@@ -378,6 +380,7 @@ def plan_change(
             get_embedding_provider,
             history=[item.model_dump() for item in payload.history],
             max_iterations=get_settings().agent_max_iterations,
+            checkout=workspace_service.open_checkout(get_workspace_root(), repository),
         )
     return PlanResponse(
         repository_id=repository.id,
@@ -424,6 +427,8 @@ def execute_change(
     return ExecuteResponse(
         repository_id=repository.id,
         status=result.status,
+        branch=result.branch,
+        uncommitted_changes=result.uncommitted_changes,
         changes=[FileChangeResponse(**vars(change)) for change in result.changes],
         summary=result.summary,
         metadata=ExecuteMetadata(

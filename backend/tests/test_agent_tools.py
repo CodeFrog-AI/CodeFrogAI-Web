@@ -208,7 +208,7 @@ def test_search_code_returns_structured_results_with_provenance(make_context, da
 
     assert result.ok
     output = result.output
-    assert set(output) == {"repository_id", "query", "results", "retrieval"}
+    assert set(output) == {"repository_id", "query", "results", "retrieval", "source"}
     assert output["repository_id"] == str(repository_id) and output["query"] == QUESTION
     top = output["results"][0]
     assert set(top) == {"file_path", "language", "start_line", "end_line", "snippet", "score", "sources", "matched_terms", "truncated"}
@@ -371,7 +371,7 @@ def test_read_file_returns_the_requested_lines_across_chunk_boundaries(reading):
     assert result.ok
     assert result.output == {
         "repository_id": str(reading.repository_id), "file_path": "src/big.py", "language": "python",
-        "start_line": 95, "end_line": 105, "total_lines": 350, "has_more": True, "truncated": False,
+        "start_line": 95, "end_line": 105, "total_lines": 350, "has_more": True, "truncated": False, "source": "index",
         "redactions": 0, "content": "\n".join(LINES[94:105]),
     }
 

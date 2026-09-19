@@ -45,5 +45,7 @@ class ExecuteResponse(BaseModel):
     status: Literal["completed", "incomplete", "limit_reached"]
     changes: list[FileChangeResponse]
     summary: str
+    branch: str | None = Field(description="The checkout's current branch.")
+    uncommitted_changes: bool = Field(description="Whether the checkout has uncommitted changes (this run's and earlier ones).")
     committed: Literal[False] = False
     metadata: ExecuteMetadata

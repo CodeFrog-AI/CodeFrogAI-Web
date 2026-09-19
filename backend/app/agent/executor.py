@@ -1,10 +1,11 @@
-"""Executing an approved plan: the agent edits a local working copy, then the diff is returned.
+"""Executing an approved plan: the agent edits the persistent local checkout, then the diff is returned.
 
 The caller (the API route) must have verified the user's approval before calling this. The
 approval is not represented here as a flag the model could influence: the write tools only
 exist in the agent's context because this function hands the agent a `Workspace`, and the
-workspace only lets it touch the files the approved plan names. Nothing is committed,
-pushed, or sent to GitHub.
+workspace only lets it touch the files the approved plan names. Edits stay in the checkout
+between executions. Nothing is committed, pushed, or sent to GitHub: the agent has no tool
+for that, and Git write operations are separate, individually approved API calls.
 """
 
 import logging
@@ -22,12 +23,13 @@ from app.db.models import Repository, User
 from app.embeddings.provider import EmbeddingProvider
 from app.schemas.plan import ImplementationPlan
 from app.workspace import FileChange, Workspace, WriteScope, exclusive_workspace
+from app.workspace import service as workspace_service
 
 logger = logging.getLogger(__name__)
 
 EXECUTION_SYSTEM_PROMPT = """You are CodeFrog, carrying out an implementation plan the user has approved for one software repository.
 
-Tools: search_code, read_file and analyze_project inspect the repository. edit_file, create_file and delete_file change the working copy.
+Tools: search_code, read_file and analyze_project inspect the repository. edit_file, create_file and delete_file change the local checkout, which keeps earlier changes. search_code shows the last repository scan and may not include recent edits; read_file shows the current local content.
 
 Rules:
 - Read a file with read_file before you edit it, and copy old_text exactly. edit_file replaces exactly one occurrence; if it fails because the text was not found or is ambiguous, read the file again and retry with more surrounding lines.
@@ -52,6 +54,8 @@ EXECUTION_LIMIT_NOTICE = (
 @dataclass(frozen=True)
 class ExecutionResult:
     status: str  # completed | incomplete | limit_reached
+    branch: str | None
+    uncommitted_changes: bool
     changes: list[FileChange]
     summary: str
     iterations: int
@@ -74,9 +78,10 @@ def execute_plan(
     history: Sequence[Mapping[str, str]] = (),
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
 ) -> ExecutionResult:
-    """Run the agent with write tools against a fresh working copy and return the net changes.
+    """Run the agent with write tools against the persistent checkout and return this run's net changes.
 
-    Provider failures raise `LLMError`; a busy repository raises `ConflictError`.
+    The checkout is cloned first if it does not exist. Provider failures raise `LLMError`; a busy
+    repository raises `ConflictError`; a missing GitHub connection raises `GitError`.
     """
 
     started = time.perf_counter()
@@ -85,9 +90,9 @@ def execute_plan(
         .replace("{owner}", repository.owner)
         .replace("{name}", repository.name)
     )
-    with exclusive_workspace(repository.id):
-        workspace = Workspace.prepare(workspace_root, repository.id, WriteScope.from_plan(plan))
-        workspace.populate(session, repository)
+    with exclusive_workspace(workspace_root, repository.id):
+        root = workspace_service.ensure_workspace(workspace_root, repository)
+        workspace = Workspace.attach(root, repository.id, WriteScope.from_plan(plan))
         result = run_agent(
             session,
             user,
@@ -102,6 +107,7 @@ def execute_plan(
             workspace=workspace,
         )
         changes = workspace.changes()
+        state = workspace_service.get_state(workspace_root, repository)
 
     if workspace.limit_reached:
         status = "limit_reached"
@@ -115,6 +121,8 @@ def execute_plan(
     )
     return ExecutionResult(
         status=status,
+        branch=state.branch,
+        uncommitted_changes=state.uncommitted_changes,
         changes=changes,
         summary=redact_secrets(result.answer)[0],
         iterations=result.iterations,

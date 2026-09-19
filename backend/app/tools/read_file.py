@@ -3,6 +3,8 @@
 import re
 import uuid
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.context.redaction import is_sensitive_path, redact_secrets
@@ -67,6 +69,9 @@ class ReadFileOutput(BaseModel):
     has_more: bool = Field(description="True when the file has lines after end_line.")
     truncated: bool = Field(description="True when the size cap cut the requested range short.")
     redactions: int
+    source: Literal["workspace", "index"] = Field(
+        description="workspace: the current local checkout (includes uncommitted edits). index: the last repository scan."
+    )
     content: str
 
 
@@ -81,10 +86,11 @@ def _read_file(context: ToolContext, arguments: ReadFileInput) -> ReadFileOutput
         .filter(RepositoryFile.repository_id == repository.id, RepositoryFile.path == arguments.file_path)
         .first()
     )
-    if context.workspace is not None:
-        # During an approved execution the agent must see its own edits, so read the working copy.
+    view = context.workspace or context.checkout
+    if view is not None:
+        # A local checkout exists: it is the source of truth, and includes earlier edits.
         try:
-            text = context.workspace.read_text(arguments.file_path)
+            text = view.read_text(arguments.file_path)
         except WorkspaceError:
             raise NotFoundError("File not found in the indexed repository") from None
         if text is None:
@@ -125,6 +131,7 @@ def _read_file(context: ToolContext, arguments: ReadFileInput) -> ReadFileOutput
         has_more=start + kept - 1 < total_lines,
         truncated=cut,
         redactions=redactions,
+        source="workspace" if view is not None else "index",
         content=text,
     )
 
@@ -132,8 +139,9 @@ def _read_file(context: ToolContext, arguments: ReadFileInput) -> ReadFileOutput
 READ_FILE = Tool(
     name="read_file",
     description=(
-        "Read lines from a file that CodeFrog has indexed for this repository (it never reads the "
-        f"local disk or GitHub). Returns up to {MAX_READ_LINES} lines per call with the line range, "
+        "Read lines from a file of this repository. Reads the repository's local checkout when one exists "
+        "(current content, including earlier edits) and otherwise the last scanned copy; the result's "
+        f"source field says which. It never contacts GitHub. Returns up to {MAX_READ_LINES} lines per call with the line range, "
         "total line count, and whether more lines follow. Sensitive files (env files, keys, "
         "credentials) cannot be read and secrets in other files are redacted."
     ),

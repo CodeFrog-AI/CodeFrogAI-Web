@@ -1,19 +1,17 @@
-"""A local working tree for approved code edits: the only place CodeFrog writes files.
+"""The persistent local checkout that approved code edits are written to.
 
-The workspace is a server-side directory holding a copy of a repository's indexed files.
-It is rebuilt from the scanner's index at the start of every execution, so edits never
-drift from, or leak into, the source of truth. Every path is validated here, every write
-is confined to the workspace directory, and all limits are enforced here, so the rules
-live in one place. Nothing in this module talks to GitHub or runs Git.
+The workspace is a directory holding a real Git working tree of one repository (see
+`app.workspace.service` for how it is created). Every path is validated here, every write
+is confined to the checkout, and all limits are enforced here, so the rules live in one
+place. This module never runs Git and never talks to GitHub.
 """
 
 import difflib
 import logging
 import os
 import re
-import shutil
+import stat
 import tempfile
-import threading
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -22,13 +20,10 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy.orm import Session
 
 from app.context.redaction import is_sensitive_path, redact_secrets
 from app.context.service import truncate_at_line
-from app.core.config import get_settings
-from app.core.exceptions import ApplicationError, ConflictError, ForbiddenError
-from app.db.models import Repository, RepositoryChunk, RepositoryFile
+from app.core.exceptions import ApplicationError, ForbiddenError
 from app.schemas.plan import ImplementationPlan, RepositoryPath
 
 logger = logging.getLogger(__name__)
@@ -36,6 +31,7 @@ logger = logging.getLogger(__name__)
 MAX_WRITE_OPERATIONS = 20
 MAX_TOTAL_BYTES_CHANGED = 1_000_000
 MAX_FILE_BYTES = 256 * 1024
+MAX_READ_BYTES = 2 * 1024 * 1024
 MAX_DIFF_CHARS_PER_FILE = 20_000
 MAX_TOTAL_DIFF_CHARS = 100_000
 MAX_PREVIEW_CHARS = 4_000
@@ -141,64 +137,14 @@ class Workspace:
         self._originals: dict[str, str | None] = {}
 
     @classmethod
-    def prepare(cls, base_directory: Path, repository_id: uuid.UUID, scope: WriteScope, **limits: int) -> "Workspace":
-        """Make a fresh, empty working tree for one repository under `base_directory`."""
+    def attach(cls, root: Path, repository_id: uuid.UUID, scope: "WriteScope | None" = None, **limits: int) -> "Workspace":
+        """Wrap an existing checkout directory. `scope` defaults to read-only (nothing may be written)."""
 
         try:
-            base = Path(base_directory).resolve()
-            base.mkdir(parents=True, exist_ok=True)
-            root = base / str(repository_id)
-            if root.is_symlink():
-                root.unlink()
-            elif root.exists():
-                shutil.rmtree(root)
-            root.mkdir()
-            return cls(root.resolve(), repository_id, scope, **limits)
-        except OSError as error:
-            logger.warning("Workspace could not be prepared (exception type=%s)", type(error).__name__)
-            raise WorkspaceError("WORKSPACE_ERROR", "The workspace could not be prepared.") from None
-
-    def populate(self, session: Session, repository: Repository) -> int:
-        """Copy the repository's indexed files into the workspace; returns how many.
-
-        Sensitive files (the index may hold config files with secrets) and paths that
-        fail validation are never copied.
-        """
-
-        rows = (
-            session.query(RepositoryFile.path, RepositoryChunk.content)
-            .outerjoin(RepositoryChunk, RepositoryChunk.repository_file_id == RepositoryFile.id)
-            .filter(RepositoryFile.repository_id == repository.id)
-            .order_by(RepositoryFile.path, RepositoryChunk.chunk_index)
-            .yield_per(500)
-        )
-        copied = 0
-        current: str | None = None
-        parts: list[str] = []
-
-        def flush() -> int:
-            return int(current is not None and self._copy_in(current, "".join(parts)))
-
-        for path, content in rows:
-            if path != current:
-                copied += flush()
-                current, parts = path, []
-            if content is not None:
-                parts.append(content)
-        return copied + flush()
-
-    def _copy_in(self, path: str, text: str) -> bool:
-        try:
-            relative = validate_path(path)
-        except WorkspaceError:
-            return False
-        if is_sensitive_path(relative):
-            return False
-        with self._io():
-            target = self._locate(relative)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(text.encode("utf-8"))
-        return True
+            resolved = Path(root).resolve(strict=True)
+        except OSError:
+            raise WorkspaceError("WORKSPACE_NOT_FOUND", "The workspace does not exist.") from None
+        return cls(resolved, repository_id, scope or WriteScope(frozenset(), frozenset(), frozenset()), **limits)
 
     # ---------------------------------------------------------------- reading
 
@@ -208,7 +154,11 @@ class Workspace:
         relative = validate_path(path)
         with self._io():
             target = self._locate(relative)
-            return self._decode(target.read_bytes()) if target.is_file() else None
+            if not target.is_file():
+                return None
+            if target.stat().st_size > MAX_READ_BYTES:
+                raise WorkspaceError("FILE_TOO_LARGE", "The file is too large to read.")
+            return self._decode(target.read_bytes())
 
     # ---------------------------------------------------------------- writing
 
@@ -281,7 +231,7 @@ class Workspace:
             if before == after:
                 continue
             action: Action = "created" if before is None else "deleted" if after is None else "modified"
-            diff, additions, deletions, truncated = _diff(relative, before, after, min(MAX_DIFF_CHARS_PER_FILE, remaining))
+            diff, additions, deletions, truncated = diff_text(relative, before, after, min(MAX_DIFF_CHARS_PER_FILE, remaining))
             remaining = max(remaining - len(diff), 0)
             changes.append(FileChange(relative, action, additions, deletions, diff, truncated))
         return changes
@@ -368,6 +318,7 @@ class Workspace:
         try:
             with os.fdopen(descriptor, "wb") as handle:
                 handle.write(data)
+            os.chmod(temporary, stat.S_IMODE(target.stat().st_mode))  # keep the executable bit: no mode-change noise in diffs
             os.replace(temporary, target)
         except OSError:
             Path(temporary).unlink(missing_ok=True)
@@ -375,7 +326,7 @@ class Workspace:
 
     @staticmethod
     def _operation(relative: str, action: Action, before: str | None, after: str | None, size: int) -> FileOperation:
-        diff, additions, deletions, _ = _diff(relative, before, after, MAX_PREVIEW_CHARS)
+        diff, additions, deletions, _ = diff_text(relative, before, after, MAX_PREVIEW_CHARS)
         return FileOperation(relative, action, size, additions, deletions, diff)
 
     @contextmanager
@@ -389,7 +340,7 @@ class Workspace:
             raise WorkspaceError("WORKSPACE_ERROR", "The file operation could not be completed.") from None
 
 
-def _diff(relative: str, before: str | None, after: str | None, limit: int) -> tuple[str, int, int, bool]:
+def diff_text(relative: str, before: str | None, after: str | None, limit: int) -> tuple[str, int, int, bool]:
     """A unified diff (secrets redacted, cut on a line boundary) with its line counts."""
 
     lines = list(
@@ -405,28 +356,3 @@ def _diff(relative: str, before: str | None, after: str | None, limit: int) -> t
     deletions = sum(1 for line in lines if line.startswith("-") and not line.startswith("---"))
     text, truncated = truncate_at_line(redact_secrets("".join(lines))[0], max(limit, 0))
     return text, additions, deletions, truncated
-
-
-_locks: dict[uuid.UUID, threading.Lock] = {}
-_locks_guard = threading.Lock()
-
-
-@contextmanager
-def exclusive_workspace(repository_id: uuid.UUID) -> Iterator[None]:
-    """Allow one execution per repository at a time in this process."""
-
-    with _locks_guard:
-        lock = _locks.setdefault(repository_id, threading.Lock())
-    if not lock.acquire(blocking=False):
-        raise ConflictError("Another execution is already running for this repository.")
-    try:
-        yield
-    finally:
-        lock.release()
-
-
-def get_workspace_root() -> Path:
-    """Where workspaces live: WORKSPACE_ROOT, or a folder in the system temp directory."""
-
-    configured = get_settings().workspace_root
-    return Path(configured) if configured else Path(tempfile.gettempdir()) / "codefrog-workspaces"
