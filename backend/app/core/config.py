@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, SecretStr, ValidationError, field_validator
+from pydantic import Field, HttpUrl, PostgresDsn, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,22 +23,34 @@ def _safe_validation_message(error: ValidationError) -> str:
     return f"Invalid application configuration: check {fields}."
 
 
-class Settings(BaseSettings):
-    """Settings loaded from the process environment or a local .env file."""
+class DatabaseSettings(BaseSettings):
+    """Only the configuration needed to reach PostgreSQL.
 
-    app_name: str = "CodeFrog AI API"
-    app_env: Literal["development", "test", "production"] = "development"
+    Database tooling (Alembic, the SQLAlchemy engine) must not depend on auth or
+    GitHub OAuth credentials, so it loads this narrower model.
+    """
+
     database_url: PostgresDsn
-    log_level: str = "INFO"
-    auth_secret_key: SecretStr = Field(min_length=32)
-    auth_algorithm: Literal["HS256"] = "HS256"
-    access_token_expire_minutes: int = Field(default=60, ge=1, le=1_440)
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+
+class Settings(DatabaseSettings):
+    """Full application settings, validated at API startup and on OAuth/auth use."""
+
+    app_name: str = "CodeFrog AI API"
+    app_env: Literal["development", "test", "production"] = "development"
+    log_level: str = "INFO"
+    auth_secret_key: SecretStr = Field(min_length=32)
+    auth_algorithm: Literal["HS256"] = "HS256"
+    access_token_expire_minutes: int = Field(default=60, ge=1, le=1_440)
+    github_client_id: str = Field(min_length=1)
+    github_client_secret: SecretStr = Field(min_length=1)
+    github_redirect_uri: HttpUrl
 
     @field_validator("app_env", mode="before")
     @classmethod
@@ -57,6 +69,16 @@ class Settings(BaseSettings):
             allowed = ", ".join(sorted(VALID_LOG_LEVELS))
             raise ValueError(f"LOG_LEVEL must be one of: {allowed}")
         return normalized
+
+
+@lru_cache
+def get_database_settings() -> DatabaseSettings:
+    """Return cached database-only settings, without leaking supplied values."""
+
+    try:
+        return DatabaseSettings()
+    except ValidationError as error:
+        raise ConfigurationError(_safe_validation_message(error)) from None
 
 
 @lru_cache

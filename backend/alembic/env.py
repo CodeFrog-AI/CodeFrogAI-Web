@@ -2,7 +2,7 @@ from logging.config import fileConfig
 
 from alembic import context
 
-from app.core.config import get_settings
+from app.core.config import get_database_settings
 from app.db.base import Base
 from app.db.database import engine
 import app.db.models  # noqa: F401  Ensure every model registers with Base.metadata.
@@ -36,7 +36,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = str(get_settings().database_url)
+    url = str(get_database_settings().database_url)
     context.configure(
         url=url,
         target_metadata=target_metadata,

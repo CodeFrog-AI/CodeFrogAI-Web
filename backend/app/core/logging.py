@@ -4,6 +4,7 @@ import logging
 import time
 import uuid
 from contextvars import ContextVar
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -11,6 +12,76 @@ from starlette.types import ASGIApp
 
 REQUEST_ID_HEADER = "X-Request-ID"
 request_id_context: ContextVar[str] = ContextVar("request_id", default="-")
+
+REDACTED_VALUE = "REDACTED"
+SENSITIVE_QUERY_PARAMS = frozenset(
+    {
+        "code",
+        "state",
+        "token",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "client_secret",
+        "client_id",
+        "secret",
+        "password",
+        "api_key",
+        "apikey",
+        "key",
+        "authorization",
+    }
+)
+
+# Loggers owned by third-party libraries that record full request URLs (including
+# query strings) rather than the sanitized, path-only messages this application's
+# own RequestLoggingMiddleware emits. OAuth codes, state, and secrets travel as
+# query parameters, so these loggers need the same redaction applied.
+SENSITIVE_URL_LOGGER_NAMES = ("httpx", "uvicorn.access")
+
+
+def _redact_url_like(value: str) -> str:
+    """Redact sensitive query parameter values within a URL or path string."""
+
+    if "?" not in value:
+        return value
+    split = urlsplit(value)
+    if not split.query:
+        return value
+    redacted_pairs = [
+        (key, REDACTED_VALUE if key.lower() in SENSITIVE_QUERY_PARAMS else val)
+        for key, val in parse_qsl(split.query, keep_blank_values=True)
+    ]
+    redacted_query = urlencode(redacted_pairs)
+    return urlunsplit((split.scheme, split.netloc, split.path, redacted_query, split.fragment))
+
+
+def _redact_arg(arg: object) -> object:
+    """Redact an individual log-record argument if it looks like a URL or path."""
+
+    if isinstance(arg, (str, bytes)):
+        text = arg.decode() if isinstance(arg, bytes) else arg
+    elif hasattr(arg, "query"):
+        # httpx.URL and similar URL objects: stringify to redact, then return as str.
+        text = str(arg)
+    else:
+        return arg
+    if not (text.startswith("/") or "://" in text):
+        return arg
+    return _redact_url_like(text)
+
+
+class SensitiveQueryStringFilter(logging.Filter):
+    """Strip OAuth codes, tokens, and secrets from third-party URL/access logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(_redact_arg(arg) for arg in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {key: _redact_arg(value) for key, value in record.args.items()}
+        elif not record.args and isinstance(record.msg, str):
+            record.msg = _redact_url_like(record.msg)
+        return True
 
 
 class RequestIdFilter(logging.Filter):
@@ -21,8 +92,24 @@ class RequestIdFilter(logging.Filter):
         return True
 
 
+def _install_sensitive_url_filters() -> None:
+    """Attach URL redaction to loggers that print raw request URLs or paths.
+
+    Attached to the logger (not a handler) so redaction runs during
+    ``Logger.handle`` before any handler — including test-only ones such as
+    pytest's ``caplog`` — ever sees the record.
+    """
+
+    for logger_name in SENSITIVE_URL_LOGGER_NAMES:
+        target_logger = logging.getLogger(logger_name)
+        if not any(isinstance(f, SensitiveQueryStringFilter) for f in target_logger.filters):
+            target_logger.addFilter(SensitiveQueryStringFilter())
+
+
 def configure_logging(log_level: str) -> None:
     """Configure a readable standard-library logger exactly once."""
+
+    _install_sensitive_url_filters()
 
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
