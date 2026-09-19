@@ -7,7 +7,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import get_settings
+from app.core.config import get_database_settings
 
 
 class DatabaseConnectionError(RuntimeError):
@@ -17,7 +17,7 @@ class DatabaseConnectionError(RuntimeError):
 def create_database_engine() -> Engine:
     """Create the PostgreSQL engine from the environment-provided URL."""
 
-    return create_engine(str(get_settings().database_url), pool_pre_ping=True)
+    return create_engine(str(get_database_settings().database_url), pool_pre_ping=True)
 
 
 engine = create_database_engine()

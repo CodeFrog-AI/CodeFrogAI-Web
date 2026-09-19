@@ -43,3 +43,9 @@ class ConflictError(ApplicationError):
     status_code = 409
     code = "CONFLICT"
     message = "The request conflicts with the current resource state"
+
+
+class BadGatewayError(ApplicationError):
+    status_code = 502
+    code = "BAD_GATEWAY"
+    message = "An upstream service request failed"
