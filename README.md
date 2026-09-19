@@ -1215,9 +1215,13 @@ The backend reads configuration from environment variables and a repository-root
    uvicorn main:app --app-dir backend --reload
    ```
 
-`DATABASE_URL` and `AUTH_SECRET_KEY` are required. Generate a unique local `AUTH_SECRET_KEY` of at least 32 characters; it signs short-lived local authentication tokens and must never be committed. `APP_NAME`, `APP_ENV` (`development`, `test`, or `production`), and `LOG_LEVEL` are optional. Use a PostgreSQL psycopg URL, such as `postgresql+psycopg://USER:PASSWORD@localhost:5432/DATABASE`.
+`DATABASE_URL` and `AUTH_SECRET_KEY` are required. Generate a unique local `AUTH_SECRET_KEY` of at least 32 characters; it signs short-lived local authentication tokens and must never be committed. `APP_NAME`, `APP_ENV` (`development`, `test`, or `production`), and `LOG_LEVEL` are optional. Use a PostgreSQL psycopg URL, such as `postgresql+psycopg://USER:PASSWORD@localhost:5434/DATABASE` (the Docker Compose database is published on host port 5434).
 
 Local account passwords must be at least 12 characters. They are stored only as Argon2 hashes; registration and public-user responses never expose password hashes.
+
+### GitHub OAuth (local development)
+
+Create a GitHub OAuth App and set its callback URL to the `GITHUB_REDIRECT_URI` in your local `.env` (for example, `http://localhost:8000/api/v1/auth/github/callback`). Set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `GITHUB_REDIRECT_URI` in `.env`; never commit this file. Start the backend, then open `/api/v1/auth/github/login` to begin authorization. CodeFrog uses GitHub only for identity at this stage and never returns or stores the GitHub access token.
 
 Run the backend tests with:
 
