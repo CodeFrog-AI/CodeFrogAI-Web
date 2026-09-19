@@ -10,6 +10,7 @@ Write operations (create_branch, commit, push) never run unless the API layer ha
 the user's explicit approval, and they only ever act on a `codefrog/` branch.
 """
 
+import hashlib
 import logging
 import re
 import uuid
@@ -40,6 +41,7 @@ MAX_COMMIT_SUBJECT_CHARS = 200
 MAX_LISTED_PATHS = 1_000
 MAX_DIFF_FILES = 50
 MAX_LOG_ENTRIES = 50
+FINGERPRINT_MAX_BYTES = 4_000_000
 
 NUL = chr(0)
 RECORD_SEPARATOR = chr(30)
@@ -236,6 +238,37 @@ class GitRepository:
             budget -= len(entry.diff)
             files.append(entry)
         return GitDiff(files, withheld=status.withheld, truncated=len(entries) > MAX_DIFF_FILES or status.truncated)
+
+    def changed_paths(self) -> list[str]:
+        """Every path with uncommitted changes (protected ones are not listed; see `status().withheld`)."""
+
+        status = self.status()
+        return sorted({*status.modified, *status.added, *status.deleted, *status.untracked, *status.conflicted})
+
+    def parent_commit(self) -> str | None:
+        result = self._run(["rev-parse", "--verify", "-q", "HEAD^"])
+        return result.stdout.strip() if result.ok else None
+
+    def changes_fingerprint(self) -> str:
+        """A hash of HEAD plus the exact content of every uncommitted change: it changes if any of them does."""
+
+        status = self.status()
+        digest = hashlib.sha256()
+        digest.update((self.head_commit() or "").encode() + NUL.encode())
+        digest.update(str(status.withheld).encode() + NUL.encode())
+        for path in sorted({*status.modified, *status.added, *status.deleted, *status.untracked, *status.conflicted}):
+            digest.update(path.encode() + NUL.encode())
+            target = self.root / path
+            if target.is_symlink():
+                digest.update(b"<symlink>")
+            elif target.is_file():
+                with target.open("rb") as handle:
+                    digest.update(handle.read(FINGERPRINT_MAX_BYTES))
+                digest.update(str(target.stat().st_size).encode())
+            else:
+                digest.update(b"<absent>")
+            digest.update(NUL.encode())
+        return digest.hexdigest()
 
     def log(self, limit: int = 10) -> list[LogEntry]:
         if self.head_commit() is None:

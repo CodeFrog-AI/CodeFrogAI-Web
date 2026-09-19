@@ -24,6 +24,7 @@ from app.db.database import get_db
 from app.db.models import User
 from app.embeddings.provider import get_embedding_provider
 from app.integrations.github.pr_diff import sanitize_diff
+from app.prfix.signing import sign_finding
 from app.pullrequests import service as pr_service
 from app.pullrequests.service import pull_request_client, pull_request_errors
 from app.scanner.service import get_owned_repository
@@ -155,6 +156,8 @@ def review_pull_request_endpoint(
         pull_request_number=number,
         review=result.review,
         warnings=result.warnings,
+        head_sha=pull_request.head_sha,
+        finding_signatures=[sign_finding(repository.id, number, pull_request.head_sha, finding) for finding in result.review.findings],
         metadata=ReviewMetadata(
             model=result.model,
             iterations=result.iterations,
