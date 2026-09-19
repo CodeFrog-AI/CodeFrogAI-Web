@@ -48,3 +48,19 @@ class ConnectedRepositoryResponse(BaseModel):
     default_branch: str
     private: bool
     connection_status: str
+
+
+class CodeSearchResult(BaseModel):
+    """One matching region of an indexed file."""
+
+    file_path: str
+    language: str | None
+    start_line: int
+    end_line: int
+    snippet: str
+
+
+class CodeSearchResponse(BaseModel):
+    repository_id: uuid.UUID
+    query: str
+    results: list[CodeSearchResult]
