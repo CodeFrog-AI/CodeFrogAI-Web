@@ -55,6 +55,10 @@ class Settings(DatabaseSettings):
     embedding_api_key: SecretStr | None = None
     embedding_model: str = "text-embedding-3-small"
     embedding_base_url: str = "https://api.openai.com/v1"
+    llm_api_key: SecretStr | None = None
+    llm_model: str = "gpt-4o-mini"
+    llm_base_url: str = "https://api.openai.com/v1"
+    agent_max_iterations: int = Field(default=6, ge=2, le=15)
 
     @field_validator("app_env", mode="before")
     @classmethod

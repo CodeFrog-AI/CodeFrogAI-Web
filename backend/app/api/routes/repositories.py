@@ -9,9 +9,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
+from app.agent.llm import LLMError, LLMNotConfiguredError, get_llm_provider
+from app.agent.service import run_agent
 from app.analyzer.service import analyze_after_scan, get_repository_analysis
 from app.auth.dependencies import get_current_user
 from app.context.service import build_repository_context
+from app.core.config import get_settings
 from app.core.exceptions import (
     BadGatewayError,
     ConflictError,
@@ -53,6 +56,7 @@ from app.scanner.semantic import (
 )
 from app.scanner.service import get_owned_repository, scan_repository
 from app.schemas.availability import ResourceAvailabilityResponse
+from app.schemas.agent import AgentMetadata, AgentRequest, AgentResponse, AgentToolCall
 from app.schemas.context import ContextRequest, RepositoryContextResponse
 from app.schemas.repositories import (
     EmbeddingIndexResponse,
@@ -297,3 +301,50 @@ def build_context(
         session, repository, get_embedding_provider, **payload.model_dump()
     )
     return RepositoryContextResponse.model_validate(asdict(context))
+
+
+@contextmanager
+def _agent_errors() -> Iterator[None]:
+    """Translate LLM provider failures into safe, client-facing API errors."""
+
+    try:
+        yield
+    except LLMNotConfiguredError:
+        raise ServiceUnavailableError("The AI agent is not configured") from None
+    except LLMError:
+        raise BadGatewayError("The AI provider request failed. Try again later.") from None
+
+
+@router.post("/{repository_id}/agent", response_model=AgentResponse)
+def ask_agent(
+    repository_id: uuid.UUID,
+    payload: AgentRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+) -> AgentResponse:
+    """Answer a question about the repository with a tool-calling agent (read-only)."""
+
+    repository = get_owned_repository(session, repository_id, current_user)
+    with _agent_errors():
+        result = run_agent(
+            session,
+            current_user,
+            repository,
+            payload.message,
+            get_llm_provider(),
+            get_embedding_provider,
+            history=[item.model_dump() for item in payload.history],
+            max_iterations=get_settings().agent_max_iterations,
+        )
+    return AgentResponse(
+        repository_id=repository.id,
+        answer=result.answer,
+        tool_calls=[AgentToolCall(**vars(call)) for call in result.tool_calls],
+        metadata=AgentMetadata(
+            iterations=result.iterations,
+            tool_calls=len(result.tool_calls),
+            stop_reason=result.stop_reason,
+            model=result.model,
+            duration_ms=result.duration_ms,
+        ),
+    )
