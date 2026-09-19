@@ -58,6 +58,7 @@ class Settings(DatabaseSettings):
     llm_api_key: SecretStr | None = None
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str = "https://api.openai.com/v1"
+    workspace_root: Path | None = None
     agent_max_iterations: int = Field(default=6, ge=2, le=15)
 
     @field_validator("app_env", mode="before")

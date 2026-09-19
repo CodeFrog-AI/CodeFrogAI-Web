@@ -9,6 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
+from app.agent.executor import execute_plan
 from app.agent.llm import LLMError, LLMNotConfiguredError, get_llm_provider
 from app.agent.planner import create_plan
 from app.agent.service import run_agent
@@ -56,9 +57,11 @@ from app.scanner.semantic import (
     semantic_search,
 )
 from app.scanner.service import get_owned_repository, scan_repository
+from app.workspace import get_workspace_root
 from app.schemas.availability import ResourceAvailabilityResponse
 from app.schemas.agent import AgentMetadata, AgentRequest, AgentResponse, AgentToolCall
 from app.schemas.context import ContextRequest, RepositoryContextResponse
+from app.schemas.execution import ExecuteMetadata, ExecuteRequest, ExecuteResponse, FileChangeResponse
 from app.schemas.plan import PlanMetadata, PlanResponse
 from app.schemas.repositories import (
     EmbeddingIndexResponse,
@@ -385,6 +388,49 @@ def plan_change(
             iterations=result.iterations,
             tool_calls=result.tool_calls,
             stop_reason=result.stop_reason,
+            duration_ms=result.duration_ms,
+        ),
+    )
+
+
+@router.post("/{repository_id}/agent/execute", response_model=ExecuteResponse)
+def execute_change(
+    repository_id: uuid.UUID,
+    payload: ExecuteRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+) -> ExecuteResponse:
+    """Carry out a plan the user approved, editing a local working copy and returning the diff.
+
+    Approval is decided here, by the server, from the authenticated user's request; the model
+    never sees or sets it. Nothing is committed, pushed, branched, or opened on GitHub.
+    """
+
+    repository = get_owned_repository(session, repository_id, current_user)
+    if payload.approved is not True:
+        raise ForbiddenError("The plan must be explicitly approved before changes are made")
+    with _agent_errors():
+        result = execute_plan(
+            session,
+            current_user,
+            repository,
+            payload.message,
+            payload.plan,
+            get_llm_provider(),
+            get_embedding_provider,
+            workspace_root=get_workspace_root(),
+            max_iterations=get_settings().agent_max_iterations,
+        )
+    return ExecuteResponse(
+        repository_id=repository.id,
+        status=result.status,
+        changes=[FileChangeResponse(**vars(change)) for change in result.changes],
+        summary=result.summary,
+        metadata=ExecuteMetadata(
+            model=result.model,
+            iterations=result.iterations,
+            tool_calls=result.tool_calls,
+            write_operations=result.write_operations,
             duration_ms=result.duration_ms,
         ),
     )
