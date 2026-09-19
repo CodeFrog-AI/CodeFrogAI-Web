@@ -10,6 +10,7 @@ from app.context.service import truncate_at_line
 from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from app.db.models import RepositoryChunk, RepositoryFile
 from app.tools.base import Tool, ToolContext, ToolInput, owned_repository
+from app.workspace import WorkspaceError
 
 MAX_READ_LINES = 300
 MAX_READ_CHARS = 16_000
@@ -80,16 +81,25 @@ def _read_file(context: ToolContext, arguments: ReadFileInput) -> ReadFileOutput
         .filter(RepositoryFile.repository_id == repository.id, RepositoryFile.path == arguments.file_path)
         .first()
     )
-    if file is None:
-        raise NotFoundError("File not found in the indexed repository")
-
-    # Only the text column: chunk rows also carry large embedding vectors we must not load.
-    chunks = (
-        context.session.query(RepositoryChunk.content)
-        .filter(RepositoryChunk.repository_file_id == file.id)
-        .order_by(RepositoryChunk.chunk_index)
-    )
-    lines = "".join(content for (content,) in chunks).split("\n")
+    if context.workspace is not None:
+        # During an approved execution the agent must see its own edits, so read the working copy.
+        try:
+            text = context.workspace.read_text(arguments.file_path)
+        except WorkspaceError:
+            raise NotFoundError("File not found in the indexed repository") from None
+        if text is None:
+            raise NotFoundError("File not found in the indexed repository")
+    else:
+        if file is None:
+            raise NotFoundError("File not found in the indexed repository")
+        # Only the text column: chunk rows also carry large embedding vectors we must not load.
+        chunks = (
+            context.session.query(RepositoryChunk.content)
+            .filter(RepositoryChunk.repository_file_id == file.id)
+            .order_by(RepositoryChunk.chunk_index)
+        )
+        text = "".join(content for (content,) in chunks)
+    lines = text.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
     total_lines = len(lines)
@@ -107,8 +117,8 @@ def _read_file(context: ToolContext, arguments: ReadFileInput) -> ReadFileOutput
 
     return ReadFileOutput(
         repository_id=repository.id,
-        file_path=file.path,
-        language=file.language,
+        file_path=arguments.file_path,
+        language=file.language if file else None,
         start_line=start,
         end_line=start + kept - 1,
         total_lines=total_lines,

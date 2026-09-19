@@ -21,6 +21,7 @@ from app.db.models import Repository, User
 from app.embeddings.provider import EmbeddingProvider
 from app.tools import ToolContext, ToolResult, execute_tool, tool_definitions
 from app.tools.base import failure
+from app.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ class AgentResult:
     duration_ms: int
 
 
-def agent_tool_specs() -> list[ToolSpec]:
+def agent_tool_specs(include_write: bool = False) -> list[ToolSpec]:
     """Tool definitions for the model, derived from the registry.
 
     `repository_id` is hidden from the model: the server always supplies the selected
@@ -78,7 +79,7 @@ def agent_tool_specs() -> list[ToolSpec]:
     """
 
     specs: list[ToolSpec] = []
-    for definition in tool_definitions():
+    for definition in tool_definitions(include_write):
         parameters = copy.deepcopy(definition["input_schema"])
         parameters.get("properties", {}).pop(REPOSITORY_ARGUMENT, None)
         required = [name for name in parameters.get("required", []) if name != REPOSITORY_ARGUMENT]
@@ -102,6 +103,7 @@ def run_agent(
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     system_prompt: str | None = None,
     limit_notice: str = LIMIT_NOTICE,
+    workspace: Workspace | None = None,
 ) -> AgentResult:
     """Answer `message` about `repository` using at most `max_iterations` model calls.
 
@@ -112,8 +114,9 @@ def run_agent(
     if max_iterations < 2:
         raise ValueError("max_iterations must be at least 2")
     started = time.perf_counter()
-    context = ToolContext(session, user, embedding_provider_factory)
-    specs = agent_tool_specs()
+    # The workspace is only ever supplied by the server after approval; it is what enables write tools.
+    context = ToolContext(session, user, embedding_provider_factory, workspace)
+    specs = agent_tool_specs(include_write=workspace is not None)
     messages: list[Message] = [
         {"role": "system", "content": system_prompt or SYSTEM_PROMPT.format(owner=repository.owner, name=repository.name)},
         *({"role": item["role"], "content": item["content"]} for item in history),

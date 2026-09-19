@@ -10,7 +10,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.orm import Session
@@ -19,6 +19,9 @@ from app.core.exceptions import ApplicationError, UnauthorizedError
 from app.db.models import Repository, User
 from app.embeddings.provider import EmbeddingProvider, get_embedding_provider
 from app.scanner.service import get_owned_repository
+
+if TYPE_CHECKING:
+    from app.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +36,16 @@ class ToolInput(BaseModel):
 
 @dataclass(frozen=True)
 class ToolContext:
-    """Who is calling and with what resources. `user` is None for an unauthenticated caller."""
+    """Who is calling and with what resources. `user` is None for an unauthenticated caller.
+
+    `workspace` is set only by the server, after the user has approved a plan. Without it,
+    write tools refuse to run: approval is a property of the context, never of model input.
+    """
 
     session: Session
     user: User | None
     embedding_provider_factory: Callable[[], EmbeddingProvider] = get_embedding_provider
+    workspace: "Workspace | None" = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +85,7 @@ class Tool(Generic[InputT]):
     description: str
     input_model: type[InputT]
     handler: Callable[[ToolContext, InputT], BaseModel]
+    writes: bool = False
 
     @property
     def input_schema(self) -> dict[str, Any]:
@@ -97,6 +106,8 @@ class Tool(Generic[InputT]):
         try:
             if context.user is None or context.user.status != "active":
                 raise UnauthorizedError()
+            if self.writes and context.workspace is None:
+                return failure("APPROVAL_REQUIRED", "Changes can only be made after the user approves a plan.")
             try:
                 parsed = self.input_model.model_validate(arguments)
             except ValidationError as error:
