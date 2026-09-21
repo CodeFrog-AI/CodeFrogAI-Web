@@ -41,6 +41,9 @@ class PublicUserResponse(BaseModel):
     name: str | None
     status: str
     created_at: datetime
+    # The linked GitHub account, if any. Never includes the GitHub token.
+    github_login: str | None = None
+    github_connected: bool = False
 
 
 class AccessTokenResponse(BaseModel):

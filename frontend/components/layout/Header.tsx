@@ -1,9 +1,9 @@
-import type { RepositoryInfo } from "@/lib/app-state";
+import type { SelectedRepository } from "@/lib/app-state";
 import { describeBranch } from "@/lib/repository";
 
 interface HeaderProps {
   title: string;
-  repository: RepositoryInfo | null;
+  repository: SelectedRepository | null;
 }
 
 export function Header({ title, repository }: HeaderProps) {
@@ -16,7 +16,7 @@ export function Header({ title, repository }: HeaderProps) {
             <span className="sr-only">Selected repository: </span>
             <span className="font-mono text-foreground">{repository.name}</span>
             <span aria-hidden="true"> · </span>
-            <span className="font-mono">{describeBranch(repository.branch)}</span>
+            <span className="font-mono">{repository.source === "local" ? describeBranch(repository.branch) : repository.defaultBranch}</span>
           </>
         ) : (
           "No repository selected"

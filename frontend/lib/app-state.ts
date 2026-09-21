@@ -18,7 +18,9 @@ export const PAGES: readonly PageDefinition[] = [
   { id: "settings", label: "Settings", description: "AI provider and GitHub connection" },
 ];
 
-export interface RepositoryInfo {
+/** A repository picked from the local disk (desktop app). */
+export interface LocalRepository {
+  source: "local";
   name: string;
   /** The absolute local path. Kept in memory only; never persisted. */
   path: string;
@@ -29,14 +31,29 @@ export interface RepositoryInfo {
   remoteUrl: string | null;
 }
 
+/** A GitHub repository connected to CodeFrog through the backend (web app). */
+export interface GitHubRepository {
+  source: "github";
+  /** The CodeFrog repository id (a UUID) that the backend's endpoints use. */
+  repositoryId: string;
+  githubRepositoryId: number;
+  owner: string;
+  name: string;
+  defaultBranch: string;
+  private: boolean;
+}
+
+/** The repository the app is working with. The two sources share no fields beyond `name`. */
+export type SelectedRepository = LocalRepository | GitHubRepository;
+
 export interface AppState {
   page: Page;
-  repository: RepositoryInfo | null;
+  repository: SelectedRepository | null;
 }
 
 export type AppAction =
   | { type: "navigate"; page: Page }
-  | { type: "select-repository"; repository: RepositoryInfo }
+  | { type: "select-repository"; repository: SelectedRepository }
   | { type: "clear-repository" };
 
 export const initialState: AppState = { page: "repositories", repository: null };

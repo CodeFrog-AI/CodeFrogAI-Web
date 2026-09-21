@@ -10,7 +10,7 @@ from app.auth.security import create_access_token
 from app.auth.service import authenticate_user, register_user
 from app.core.exceptions import UnauthorizedError
 from app.db.database import get_db
-from app.db.models import User
+from app.db.models import GitHubAccount, User
 from app.schemas.auth import AccessTokenResponse, LoginRequest, PublicUserResponse, RegistrationRequest
 
 
@@ -43,7 +43,16 @@ def login(
 
 
 @router.get("/me", response_model=PublicUserResponse)
-def get_me(current_user: Annotated[User, Depends(get_current_user)]) -> User:
-    """Return the authenticated user's public profile."""
+def get_me(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+) -> PublicUserResponse:
+    """Return the authenticated user's public profile and GitHub connection state."""
 
-    return current_user
+    account = session.query(GitHubAccount).filter(GitHubAccount.user_id == current_user.id).first()
+    return PublicUserResponse.model_validate(current_user).model_copy(
+        update={
+            "github_login": account.login if account is not None else None,
+            "github_connected": account is not None and account.access_token_encrypted is not None,
+        }
+    )

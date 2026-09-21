@@ -47,7 +47,7 @@ describe("parseRepositoryInfo", () => {
 
   it("copies only the known fields", () => {
     const parsed = parseRepositoryInfo({ ...VALID_RESPONSE, token: "secret", env: { PATH: "x" } });
-    expect(Object.keys(parsed).sort()).toEqual(["branch", "isDirty", "name", "path", "remoteUrl"]);
+    expect(Object.keys(parsed).sort()).toEqual(["branch", "isDirty", "name", "path", "remoteUrl", "source"]);
   });
 
   it("removes credentials from the remote URL", () => {
