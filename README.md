@@ -1219,9 +1219,51 @@ The backend reads configuration from environment variables and a repository-root
 
 Local account passwords must be at least 12 characters. They are stored only as Argon2 hashes; registration and public-user responses never expose password hashes.
 
-### GitHub OAuth (local development)
+### Connecting GitHub (web)
 
-Create a GitHub OAuth App and set its callback URL to the `GITHUB_REDIRECT_URI` in your local `.env` (for example, `http://localhost:8000/api/v1/auth/github/callback`). Set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `GITHUB_REDIRECT_URI` in `.env`; never commit this file. Start the backend, then open `/api/v1/auth/github/login` to begin authorization. CodeFrog uses GitHub only for identity at this stage and never returns or stores the GitHub access token.
+CodeFrog signs you in with GitHub OAuth, then lists your repositories so you can connect one.
+
+**1. Create a GitHub OAuth App** (GitHub → Settings → Developer settings → OAuth Apps → New OAuth App):
+
+- Homepage URL: `http://localhost:3000`
+- Authorization callback URL: `http://localhost:8000/api/v1/auth/github/callback`
+
+Use `localhost` everywhere for local development (frontend, backend, and the callback). Do not mix `localhost` and `127.0.0.1`: the OAuth state cookie is bound to the host, and CORS allows only `FRONTEND_URL`.
+
+**2. Configure the backend** in the repository-root `.env` (never commit it; the values below are placeholders):
+
+```text
+DATABASE_URL=
+AUTH_SECRET_KEY=
+TOKEN_ENCRYPTION_KEY=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+GITHUB_REDIRECT_URI=http://localhost:8000/api/v1/auth/github/callback
+GITHUB_OAUTH_SCOPES=read:user user:email repo
+FRONTEND_URL=http://localhost:3000
+```
+
+- `TOKEN_ENCRYPTION_KEY` is a Fernet key (`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`). It is **required**: the GitHub token is stored encrypted, and sign-in fails with a clear error if the key is missing or invalid instead of pretending to connect.
+- `GITHUB_OAUTH_SCOPES` defaults to `read:user user:email repo`. `read:user` and `user:email` (identity) are always requested even if you leave them out. `repo` is needed to list private repositories, clone, push, and open pull requests. Anyone who signed in before with narrower scopes must reconnect.
+- `FRONTEND_URL` is an origin (no path). It is where the OAuth callback sends the browser, and the only CORS origin.
+
+**3. Configure the frontend** in `frontend/.env.local`:
+
+```text
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+**4. Run both** (`uvicorn main:app --app-dir backend --reload` and `npm run dev` in `frontend/`), open `http://localhost:3000`, and choose **Connect GitHub** (on the Repositories page or in Settings).
+
+**How the flow works**
+
+1. **Connect GitHub** is a full-page navigation to `GET /api/v1/auth/github/login`, which redirects to GitHub with a random, single-use state (CSRF protection, also bound to a cookie).
+2. GitHub redirects to the backend callback, which checks the state, exchanges the code, links the account, and stores the GitHub token encrypted (it is never sent to the browser).
+3. The backend redirects to `FRONTEND_URL/auth/callback#access_token=<CodeFrog JWT>`. The token is in the URL *fragment* (never a query string, so it is not sent to any server). On failure it redirects to `#error=<code>` with a fixed, safe code.
+4. The frontend reads the fragment, removes it from the address bar immediately, keeps the JWT in `sessionStorage` (the only thing the app stores in the browser; never `localStorage`), and calls `GET /api/v1/auth/me`.
+5. **Repositories** then shows your GitHub repositories (`GET /api/v1/repositories/github`). Choosing one calls `POST /api/v1/repositories/connect`, and the connected repository is shown with a **Scan Repository** button. **Settings** shows the connection state (`✓ Connected`, `GitHub account: @you`, **Reconnect GitHub**).
+
+A 401 clears the session and returns you to **Connect GitHub**; a 403 offers **Reconnect GitHub**. Local (desktop) repositories are a separate flow and are not affected.
 
 Run the backend tests with:
 

@@ -13,6 +13,8 @@ AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token"
 USER_URL = "https://api.github.com/user"
 USER_EMAILS_URL = "https://api.github.com/user/emails"
+# The identity flow needs these regardless of what is configured.
+REQUIRED_IDENTITY_SCOPES = ("read:user", "user:email")
 
 
 class GitHubOAuthError(RuntimeError):
@@ -29,18 +31,26 @@ class GitHubIdentity:
     name: str | None
 
 
+def oauth_scopes() -> str:
+    """The configured scopes (GITHUB_OAUTH_SCOPES), always including the identity scopes."""
+
+    configured = get_settings().github_oauth_scopes.split()
+    extra = [scope for scope in configured if scope not in REQUIRED_IDENTITY_SCOPES]
+    return " ".join([*REQUIRED_IDENTITY_SCOPES, *extra])
+
+
 class GitHubOAuthClient:
-    """Perform only the OAuth operations needed for GitHub identity authentication."""
+    """Perform only the OAuth operations needed for GitHub authentication."""
 
     def build_authorization_url(self, state: str) -> str:
-        """Build the trusted GitHub authorization URL with identity-only scopes."""
+        """Build the trusted GitHub authorization URL with the configured scopes."""
 
         settings = get_settings()
         query = urlencode(
             {
                 "client_id": settings.github_client_id,
                 "redirect_uri": str(settings.github_redirect_uri),
-                "scope": "read:user user:email",
+                "scope": oauth_scopes(),
                 "state": state,
             }
         )

@@ -128,6 +128,7 @@ def test_login_and_protected_identity_flow(client):
     assert PASSWORD not in login.text
     assert current_user.status_code == 200
     assert current_user.json()["email"] == "developer@example.com"
+    assert current_user.json()["github_login"] is None and current_user.json()["github_connected"] is False
     assert "password_hash" not in current_user.text
 
 

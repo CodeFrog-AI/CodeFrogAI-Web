@@ -55,8 +55,8 @@ def store_github_token(session: Session, github_user_id: int, access_token: str)
     """Persist the encrypted provider token so the server can call GitHub for the user."""
 
     account = find_github_account(session, github_user_id)
-    encrypted = encrypt_access_token(access_token)
-    if account is None or encrypted is None:
-        return
+    encrypted = encrypt_access_token(access_token)  # raises TokenEncryptionError instead of skipping
+    if account is None:
+        raise BadRequestError("GitHub authentication could not be completed")
     account.access_token_encrypted = encrypted
     session.commit()

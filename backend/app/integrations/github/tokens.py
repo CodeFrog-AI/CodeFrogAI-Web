@@ -20,10 +20,27 @@ def decrypt_access_token(encrypted_token: str | None) -> str | None:
         raise GitHubAuthError("GitHub token could not be decrypted") from None
 
 
-def encrypt_access_token(access_token: str) -> str | None:
-    """Encrypt a token for storage, or return None when no encryption key is configured."""
+class TokenEncryptionError(RuntimeError):
+    """GitHub tokens cannot be stored because TOKEN_ENCRYPTION_KEY is missing or invalid."""
 
+
+def _fernet() -> Fernet:
     key = get_settings().token_encryption_key
     if key is None:
-        return None
-    return Fernet(key.get_secret_value().encode()).encrypt(access_token.encode()).decode()
+        raise TokenEncryptionError("TOKEN_ENCRYPTION_KEY is not configured")
+    try:
+        return Fernet(key.get_secret_value().encode())
+    except (ValueError, TypeError):
+        raise TokenEncryptionError("TOKEN_ENCRYPTION_KEY is invalid") from None
+
+
+def require_token_encryption() -> None:
+    """Raise TokenEncryptionError unless a usable encryption key is configured."""
+
+    _fernet()
+
+
+def encrypt_access_token(access_token: str) -> str:
+    """Encrypt a token for storage. Never silently skips: a missing or invalid key raises."""
+
+    return _fernet().encrypt(access_token.encode()).decode()

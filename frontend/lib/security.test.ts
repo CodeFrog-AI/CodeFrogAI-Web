@@ -21,10 +21,75 @@ function sourceFiles(directory: string): string[] {
 const UI_SOURCES = [...sourceFiles("app"), ...sourceFiles("components"), ...sourceFiles("lib")];
 
 describe("frontend security guarantees", () => {
-  it("never uses browser storage, so nothing (keys, paths, contents) is persisted", () => {
+  it("never uses localStorage, IndexedDB, or cookies, so nothing (paths, contents, keys) is persisted there", () => {
     for (const file of UI_SOURCES) {
-      expect(read(file), file).not.toMatch(/\b(localStorage|sessionStorage|indexedDB)\b|document\.cookie/);
+      expect(read(file), file).not.toMatch(/\b(localStorage|indexedDB|openDatabase)\b|document\.cookie/);
     }
+  });
+
+  it("uses sessionStorage only in lib/session.ts, and only for the CodeFrog JWT", () => {
+    for (const file of UI_SOURCES) {
+      const usesSessionStorage = /\bsessionStorage\b/.test(read(file));
+      expect(usesSessionStorage, file).toBe(file === "lib/session.ts");
+    }
+    const session = read("lib/session.ts");
+    expect(session.match(/setItem\(/g)).toHaveLength(2); // the interface declaration and the single call
+    expect(session).toMatch(/storage\.setItem\(SESSION_KEY, token\)/);
+    expect(session).toMatch(/SESSION_KEY = "codefrog\.access_token"/);
+  });
+
+  it("holds no GitHub access token, client secret, or provider credential in the frontend", () => {
+    for (const file of UI_SOURCES) {
+      expect(read(file), file).not.toMatch(/github_access_token|GITHUB_CLIENT_SECRET|client_secret|\bgh[opsu]_[A-Za-z0-9]{10}|GITHUB_CLIENT_ID/i);
+    }
+  });
+
+  it("reads exactly one public environment variable: the backend URL", () => {
+    const variables = UI_SOURCES.flatMap((file) => [...read(file).matchAll(/process\.env\.([A-Z0-9_]+)/g)].map((match) => match[1]));
+    expect([...new Set(variables)]).toEqual(["NEXT_PUBLIC_API_URL"]);
+  });
+
+  it("talks to the network only through the API client (plus the existing backend health check)", () => {
+    const callers = UI_SOURCES.filter((file) => /\bfetch\(/.test(read(file))).sort();
+    expect(callers).toEqual(["app/backend-check/page.tsx", "lib/api.ts"]);
+    for (const file of sourceFiles("components")) {
+      expect(read(file), file).not.toMatch(/https?:\/\/(localhost|127\.0\.0\.1)|XMLHttpRequest|WebSocket/);
+    }
+  });
+
+  it("starts GitHub OAuth with a full-page navigation, not fetch, a popup, or an iframe", () => {
+    const auth = read("lib/github-auth.ts");
+    expect(auth).toMatch(/window\.location\.assign\(url\)/);
+    expect(auth).not.toMatch(/\bfetch\(|window\.open|<iframe/);
+    for (const file of sourceFiles("components")) {
+      expect(read(file), file).not.toMatch(/window\.open|<iframe|githubLoginUrl/);
+    }
+    // Connect GitHub buttons all call the one helper.
+    for (const file of ["components/github/GitHubConnectionCard.tsx", "components/github/GitHubRepositoryPicker.tsx", "components/pages/RepositoriesPage.tsx"]) {
+      expect(read(file), file).toMatch(/connectGitHub\(\)/);
+    }
+  });
+
+  it("never logs, renders, or leaves the JWT in the URL", () => {
+    for (const file of ["lib/api.ts", "lib/session.ts", "lib/github-auth.ts", "lib/github-repositories.ts", "lib/auth-context.tsx", "app/auth/callback/page.tsx"]) {
+      expect(read(file), file).not.toMatch(/console\.|debugger/);
+    }
+    const page = read("app/auth/callback/page.tsx");
+    expect(page).not.toMatch(/access_token|searchParams|location\.search|\{token\}/);
+    expect(page).toMatch(/replaceState/);
+    const auth = read("lib/github-auth.ts");
+    // The URL is cleaned before the token is stored or sent anywhere.
+    expect(auth.indexOf("deps.replaceUrl()")).toBeGreaterThan(-1);
+    expect(auth.indexOf("deps.replaceUrl()")).toBeLessThan(auth.indexOf("setSessionToken(outcome.token"));
+    // The token only ever goes out as a Bearer header.
+    const api = read("lib/api.ts");
+    expect(api.match(/\$\{token\}/g)).toHaveLength(1);
+    expect(api).toMatch(/Authorization = `Bearer \$\{token\}`/);
+    expect(UI_SOURCES.filter((file) => /[?&]access_token=/.test(read(file)))).toEqual([]);
+  });
+
+  it("only accepts fixed backend API paths", () => {
+    expect(read("lib/api.ts")).toMatch(/API_PATH = \/\^\\\/api\\\/v1\\\//);
   });
 
   it("only ever invokes the four intended commands, by constant, from the two service modules", () => {

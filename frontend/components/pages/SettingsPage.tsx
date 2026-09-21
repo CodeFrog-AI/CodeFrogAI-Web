@@ -2,6 +2,7 @@
 
 import { useId, useState, type FormEvent } from "react";
 
+import { GitHubConnectionCard } from "@/components/github/GitHubConnectionCard";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -63,9 +64,7 @@ export function SettingsPage() {
           </div>
         </Card>
 
-        <Card title="GitHub connection" description="Connect your account so CodeFrog can work with pull requests.">
-          <p className="text-sm text-muted">Not connected. GitHub sign-in is not available in the desktop app yet.</p>
-        </Card>
+        <GitHubConnectionCard />
 
         <div className="flex items-center gap-3">
           <Button type="submit" variant="primary">

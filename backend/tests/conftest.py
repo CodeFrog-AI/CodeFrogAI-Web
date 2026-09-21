@@ -20,6 +20,9 @@ os.environ.setdefault(
 )
 
 os.environ.setdefault("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+# Pinned so a developer's real .env cannot change what the OAuth tests see.
+os.environ.setdefault("GITHUB_OAUTH_SCOPES", "read:user user:email repo")
+os.environ.setdefault("FRONTEND_URL", "http://localhost:3000")
 
 # Permit `pytest backend/tests` from the repository root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

@@ -3,13 +3,13 @@
  * `selectLocalRepository()` and gets typed data or a typed error back.
  *
  * Flow: native folder picker -> the `select_repository` command (validates the folder and
- * reads Git metadata) -> a parsed, validated `RepositoryInfo`. Nothing is faked: outside the
+ * reads Git metadata) -> a parsed, validated `LocalRepository`. Nothing is faked: outside the
  * desktop app the call fails with DESKTOP_REQUIRED.
  */
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
-import type { RepositoryInfo } from "@/lib/app-state";
+import type { LocalRepository } from "@/lib/app-state";
 
 export const SELECT_REPOSITORY_COMMAND = "select_repository";
 
@@ -50,7 +50,7 @@ export class LocalRepositoryError extends Error {
   }
 }
 
-export type SelectionResult = { status: "selected"; repository: RepositoryInfo } | { status: "cancelled" };
+export type SelectionResult = { status: "selected"; repository: LocalRepository } | { status: "cancelled" };
 
 /** What the desktop app provides. Tests supply a fake; production uses `tauriNative`. */
 export interface NativeBridge {
@@ -75,7 +75,7 @@ export function stripUrlCredentials(url: string): string {
 }
 
 /** Validate the command's result. Anything unexpected is an INVALID_RESPONSE, never partial data. */
-export function parseRepositoryInfo(value: unknown): RepositoryInfo {
+export function parseRepositoryInfo(value: unknown): LocalRepository {
   if (!isRecord(value)) throw new LocalRepositoryError("INVALID_RESPONSE");
   const { name, path, branch, isDirty, remoteUrl } = value;
 
@@ -87,6 +87,7 @@ export function parseRepositoryInfo(value: unknown): RepositoryInfo {
   if (remoteUrl !== null && !isText(remoteUrl, MAX_TEXT_LENGTH)) throw new LocalRepositoryError("INVALID_RESPONSE");
 
   return {
+    source: "local",
     name,
     path,
     branch,
