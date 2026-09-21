@@ -1,26 +1,30 @@
 import { describe, expect, it } from "vitest";
 
-import { describeLanguages, NOT_ANALYZED, SAMPLE_REPOSITORY } from "@/lib/repository";
+import { describeBranch, describeGitStatus, describeRemote } from "@/lib/repository";
 
-describe("describeLanguages", () => {
-  it("shows a placeholder when nothing is detected", () => {
-    expect(describeLanguages([])).toBe(NOT_ANALYZED);
+describe("describeBranch", () => {
+  it("shows the branch name", () => {
+    expect(describeBranch("feature/x")).toBe("feature/x");
   });
 
-  it("joins detected languages", () => {
-    expect(describeLanguages(["Python", "TypeScript"])).toBe("Python, TypeScript");
+  it("explains a detached HEAD", () => {
+    expect(describeBranch(null)).toBe("Detached HEAD");
   });
 });
 
-describe("SAMPLE_REPOSITORY", () => {
-  it("is clearly placeholder data with nothing analyzed", () => {
-    expect(SAMPLE_REPOSITORY.status).toBe(NOT_ANALYZED);
-    expect(SAMPLE_REPOSITORY.projectType).toBe(NOT_ANALYZED);
-    expect(SAMPLE_REPOSITORY.languages).toEqual([]);
+describe("describeGitStatus", () => {
+  it("distinguishes clean from dirty", () => {
+    expect(describeGitStatus(false)).toBe("Clean");
+    expect(describeGitStatus(true)).toBe("Uncommitted changes");
+  });
+});
+
+describe("describeRemote", () => {
+  it("shows the remote URL", () => {
+    expect(describeRemote("https://github.com/o/r.git")).toBe("https://github.com/o/r.git");
   });
 
-  it("points at no real absolute path or credential", () => {
-    expect(SAMPLE_REPOSITORY.path.startsWith("~/")).toBe(true);
-    expect(JSON.stringify(SAMPLE_REPOSITORY)).not.toMatch(/key|token|secret/i);
+  it("says when there is no remote", () => {
+    expect(describeRemote(null)).toBe("No remote configured");
   });
 });

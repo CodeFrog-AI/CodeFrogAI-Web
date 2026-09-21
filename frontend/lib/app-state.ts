@@ -20,11 +20,13 @@ export const PAGES: readonly PageDefinition[] = [
 
 export interface RepositoryInfo {
   name: string;
+  /** The absolute local path. Kept in memory only; never persisted. */
   path: string;
-  branch: string;
-  status: string;
-  projectType: string;
-  languages: readonly string[];
+  /** null when HEAD is detached. */
+  branch: string | null;
+  isDirty: boolean;
+  /** The `origin` remote, credentials removed, or null if there is none. */
+  remoteUrl: string | null;
 }
 
 export interface AppState {

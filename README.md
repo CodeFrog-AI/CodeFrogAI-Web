@@ -1260,11 +1260,22 @@ npm run desktop:build   # static export (frontend/out) + installer under fronten
 
 `npm run build:desktop` only produces the static export the desktop app loads (`CODEFROG_DESKTOP=1`); the normal `npm run build` is unchanged.
 
+### Local repository selection
+
+In the desktop app, **Open Repository** opens the operating system's folder picker. The chosen folder is checked by a small Rust command (`select_repository`) that:
+
+- rejects paths that do not exist, are not folders, are unreadable, or contain no `.git`;
+- runs a few fixed, read-only `git` commands (no shell, nothing supplied by the UI) to read the current branch, whether the working tree has uncommitted changes, and the `origin` remote URL (with any embedded credentials removed).
+
+The result is shown on the Repositories dashboard: name, local path, current branch, Git status, and remote URL. Errors are shown with fixed messages (`INVALID_PATH`, `NOT_A_GIT_REPOSITORY`, `PERMISSION_DENIED`, `GIT_UNAVAILABLE`), with a **Try again** action. The selected repository lives only in memory and is not remembered after the app closes.
+
+Requirements: the desktop app (the native folder picker and the command do not exist in a browser, where Open Repository shows "Open Repository is available in the CodeFrog desktop app."), Git installed and on `PATH`, and the Rust toolchain plus Visual Studio C++ Build Tools (Windows) to build it.
+
+Repository scanning, search, and the agent are later phases: selecting a repository only reads its name, path, branch, status, and remote.
+
 ### Current desktop limitations
 
-This phase is the application shell only:
-
-- Repository selection is not connected: "Open Repository" loads sample data, and nothing is read from disk or GitHub.
-- The Agent, Pull Requests, and Settings pages are placeholders; nothing is sent to the backend, and settings are not saved (API keys are never persisted in the browser).
-- The desktop shell has no native filesystem, shell, or Git access and registers no Tauri plugins or commands.
-- `Cargo.lock` is created on the first desktop build; icons are generated placeholders.
+- Selecting a repository reads metadata only; nothing in the repository is scanned, indexed, or sent anywhere, and it is not connected to the backend yet.
+- The Agent, Pull Requests, and Settings pages are placeholders; settings are not saved (API keys are never persisted in the browser).
+- The desktop shell's only native capabilities are the folder picker (`dialog:allow-open`) and the read-only `select_repository` command. There is no filesystem, shell, or general Git access from the UI.
+- The Rust side (`frontend/src-tauri`) has not been compiled or run on every machine: it needs the Rust toolchain and, on Windows, the Visual Studio C++ Build Tools. `Cargo.lock` is created on the first desktop build; icons are generated placeholders.

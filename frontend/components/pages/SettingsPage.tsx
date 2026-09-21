@@ -10,7 +10,7 @@ const FIELD = "mt-1 w-full rounded-md border border-border bg-background px-3 py
 
 /**
  * Settings placeholders. Nothing is saved: the API key lives only in this component's memory
- * (never in localStorage or anywhere else) and is discarded on save and on leaving the page.
+ * (never in browser storage or anywhere else) and is discarded on save and on leaving the page.
  */
 export function SettingsPage() {
   const keyId = useId();
