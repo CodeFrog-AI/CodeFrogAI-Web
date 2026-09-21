@@ -1,0 +1,166 @@
+"""Response schemas for repository operations."""
+
+import uuid
+from datetime import datetime
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from app.db.models import RepositoryAnalysis
+
+
+class ScanEmbeddingResult(BaseModel):
+    """Outcome of the automatic embedding step run after a scan.
+
+    `failed` and `not_configured` mean the scan itself succeeded but semantic search
+    is not up to date. Counts are None when the step did not complete.
+    """
+
+    status: Literal["completed", "not_configured", "failed"]
+    chunks_embedded: int | None = None
+    chunks_reused: int | None = None
+    chunks_skipped: int | None = None
+    message: str | None = None
+
+
+class RepositoryScanResponse(BaseModel):
+    """Outcome of a repository scan. Contains counts only, never GitHub credentials."""
+
+    repository_id: uuid.UUID
+    status: Literal["completed"]
+    files_discovered: int
+    files_indexed: int
+    files_skipped: int
+    files_removed: int
+    chunks_created: int
+    embeddings: ScanEmbeddingResult
+
+
+class GitHubRepositoryResponse(BaseModel):
+    """A GitHub repository the user can select, with its CodeFrog connection state."""
+
+    github_repository_id: int
+    owner: str
+    name: str
+    default_branch: str
+    private: bool
+    connected: bool
+
+
+class GitHubRepositoryListResponse(BaseModel):
+    repositories: list[GitHubRepositoryResponse]
+
+
+class ConnectRepositoryRequest(BaseModel):
+    # GitHub IDs are stored in a 32-bit INTEGER column.
+    github_repository_id: int = Field(gt=0, le=2_147_483_647)
+
+
+class ConnectedRepositoryResponse(BaseModel):
+    """A connected repository. Never includes GitHub credentials."""
+
+    id: uuid.UUID
+    github_repository_id: int
+    owner: str
+    name: str
+    default_branch: str
+    private: bool
+    connection_status: str
+
+
+class CodeSearchResult(BaseModel):
+    """One matching region of an indexed file."""
+
+    file_path: str
+    language: str | None
+    start_line: int
+    end_line: int
+    snippet: str
+
+
+class CodeSearchResponse(BaseModel):
+    repository_id: uuid.UUID
+    query: str
+    results: list[CodeSearchResult]
+
+
+class EmbeddingIndexResponse(BaseModel):
+    """Outcome of embedding a repository's chunks. Counts only; never vectors or keys."""
+
+    repository_id: uuid.UUID
+    status: Literal["completed"]
+    chunks_total: int
+    chunks_embedded: int
+    chunks_reused: int
+    chunks_skipped: int
+
+
+class SemanticSearchResult(BaseModel):
+    file_path: str
+    language: str | None
+    start_line: int
+    end_line: int
+    snippet: str
+    score: float = Field(description="Cosine similarity in [-1, 1]; higher means more relevant.")
+
+
+class SemanticSearchResponse(BaseModel):
+    repository_id: uuid.UUID
+    query: str
+    results: list[SemanticSearchResult]
+
+
+class DependencyResponse(BaseModel):
+    name: str
+    ecosystem: str
+    dev: bool
+
+
+class EntryPointResponse(BaseModel):
+    kind: str
+    name: str
+    path: str
+
+
+class SkippedManifestResponse(BaseModel):
+    path: str
+    reason: str
+
+
+class ProjectAnalysisResponse(BaseModel):
+    """Static project analysis. Contains detected facts only, never file contents or secrets.
+
+    `partial` means some manifests were skipped (see `skipped_manifests`); `failed` means
+    the last analysis attempt failed and the data shown, if any, may be stale.
+    """
+
+    repository_id: uuid.UUID
+    status: Literal["completed", "partial", "failed"]
+    project_type: str
+    languages: list[str]
+    frameworks: list[str]
+    package_managers: list[str]
+    dependencies: list[DependencyResponse]
+    important_files: list[str]
+    entry_points: list[EntryPointResponse]
+    skipped_manifests: list[SkippedManifestResponse]
+    updated_at: datetime
+
+    @classmethod
+    def from_analysis(cls, repository_id: uuid.UUID, analysis: "RepositoryAnalysis") -> "ProjectAnalysisResponse":
+        """Build the response from a stored analysis row."""
+
+        return cls(
+            repository_id=repository_id,
+            status=analysis.status,
+            project_type=analysis.project_type,
+            languages=analysis.languages or [],
+            frameworks=analysis.frameworks or [],
+            package_managers=analysis.package_managers or [],
+            dependencies=analysis.dependencies or [],
+            important_files=analysis.important_files or [],
+            entry_points=analysis.entry_points or [],
+            skipped_manifests=(analysis.analysis_metadata or {}).get("manifests_skipped", []),
+            updated_at=analysis.updated_at,
+        )

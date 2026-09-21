@@ -8,3 +8,5 @@ pytest>=8.0,<9.0
 httpx>=0.27,<1.0
 argon2-cffi>=23,<26
 PyJWT>=2.9,<3
+cryptography>=43,<47
+pgvector>=0.3,<1

@@ -43,3 +43,21 @@ class ConflictError(ApplicationError):
     status_code = 409
     code = "CONFLICT"
     message = "The request conflicts with the current resource state"
+
+
+class BadGatewayError(ApplicationError):
+    status_code = 502
+    code = "BAD_GATEWAY"
+    message = "An upstream service request failed"
+
+
+class ServiceUnavailableError(ApplicationError):
+    status_code = 503
+    code = "SERVICE_UNAVAILABLE"
+    message = "The service is temporarily unavailable"
+
+
+class RateLimitedError(ApplicationError):
+    status_code = 429
+    code = "RATE_LIMITED"
+    message = "An upstream rate limit was reached. Try again later."

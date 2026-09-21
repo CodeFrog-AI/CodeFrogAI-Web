@@ -1215,9 +1215,13 @@ The backend reads configuration from environment variables and a repository-root
    uvicorn main:app --app-dir backend --reload
    ```
 
-`DATABASE_URL` and `AUTH_SECRET_KEY` are required. Generate a unique local `AUTH_SECRET_KEY` of at least 32 characters; it signs short-lived local authentication tokens and must never be committed. `APP_NAME`, `APP_ENV` (`development`, `test`, or `production`), and `LOG_LEVEL` are optional. Use a PostgreSQL psycopg URL, such as `postgresql+psycopg://USER:PASSWORD@localhost:5432/DATABASE`.
+`DATABASE_URL` and `AUTH_SECRET_KEY` are required. Generate a unique local `AUTH_SECRET_KEY` of at least 32 characters; it signs short-lived local authentication tokens and must never be committed. `APP_NAME`, `APP_ENV` (`development`, `test`, or `production`), and `LOG_LEVEL` are optional. Use a PostgreSQL psycopg URL, such as `postgresql+psycopg://USER:PASSWORD@localhost:5434/DATABASE` (the Docker Compose database is published on host port 5434).
 
 Local account passwords must be at least 12 characters. They are stored only as Argon2 hashes; registration and public-user responses never expose password hashes.
+
+### GitHub OAuth (local development)
+
+Create a GitHub OAuth App and set its callback URL to the `GITHUB_REDIRECT_URI` in your local `.env` (for example, `http://localhost:8000/api/v1/auth/github/callback`). Set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `GITHUB_REDIRECT_URI` in `.env`; never commit this file. Start the backend, then open `/api/v1/auth/github/login` to begin authorization. CodeFrog uses GitHub only for identity at this stage and never returns or stores the GitHub access token.
 
 Run the backend tests with:
 
@@ -1227,3 +1231,76 @@ python -m pytest backend/tests -q
 
 
 
+
+## Frontend and desktop app
+
+The UI lives in `frontend/` (Next.js + React + TypeScript, Tailwind). The same UI runs in the browser and inside a [Tauri](https://tauri.app) desktop window that talks to the existing FastAPI backend.
+
+### Web UI
+
+```bash
+cd frontend
+npm install
+npm run dev        # http://localhost:3000
+npm run lint
+npm test           # unit tests for the UI state logic (Vitest)
+npm run build      # regular web build
+```
+
+### Desktop app (Tauri)
+
+Prerequisites (one time): the [Rust toolchain](https://rustup.rs), the [Tauri system prerequisites](https://tauri.app/start/prerequisites/) (on Windows: Visual Studio Build Tools with the "Desktop development with C++" workload, and WebView2).
+
+```bash
+cd frontend
+npm install
+npm run desktop:dev     # starts the Next.js dev server and opens the desktop window
+npm run desktop:build   # static export (frontend/out) + installer under frontend/src-tauri/target
+```
+
+`npm run build:desktop` only produces the static export the desktop app loads (`CODEFROG_DESKTOP=1`); the normal `npm run build` is unchanged.
+
+### Local repository selection
+
+In the desktop app, **Open Repository** opens the operating system's folder picker. The chosen folder is checked by a small Rust command (`select_repository`) that:
+
+- rejects paths that do not exist, are not folders, are unreadable, or contain no `.git`;
+- runs a few fixed, read-only `git` commands (no shell, nothing supplied by the UI) to read the current branch, whether the working tree has uncommitted changes, and the `origin` remote URL (with any embedded credentials removed).
+
+The result is shown on the Repositories dashboard: name, local path, current branch, Git status, and remote URL. Errors are shown with fixed messages (`INVALID_PATH`, `NOT_A_GIT_REPOSITORY`, `PERMISSION_DENIED`, `GIT_UNAVAILABLE`), with a **Try again** action. The selected repository lives only in memory and is not remembered after the app closes.
+
+Requirements: the desktop app (the native folder picker and the command do not exist in a browser, where Open Repository shows "Open Repository is available in the CodeFrog desktop app."), Git installed and on `PATH`, and the Rust toolchain plus Visual Studio C++ Build Tools (Windows) to build it.
+
+Repository scanning, search, and the agent are later phases: selecting a repository only reads its name, path, branch, status, and remote.
+
+### Repository explorer
+
+Once a repository is selected, the Repositories page shows a **Files** panel: an expandable file tree on the left and a read-only viewer on the right. Click a folder to open or close it, click a file to see its name, relative path, size, and text contents (whitespace and line breaks preserved). **Refresh** rebuilds the tree from disk and re-reads the open file. Nothing is written: the explorer never modifies the repository or creates commits.
+
+**Security boundary.** The UI never sends a root or an absolute path. The desktop app remembers the repository that was selected with Open Repository and only serves files below it; the UI may ask only for a repository-relative path:
+
+- absolute paths, `../` traversal, backslashes, drive letters, `:`, empty or `.` segments, and control characters (including NUL) are rejected;
+- after the path is resolved on disk (symlinks followed), it must still be inside the repository, so a symlink pointing outside cannot be read; the tree never lists or follows symlinks;
+- ignored folders (below) cannot be opened even by typing their path, so `.git` (which can hold remote credentials) is never readable, including through a symlink;
+- file contents are not logged, stored, or sent anywhere: they are held in memory only while shown.
+
+**Ignored names** (at any depth, case-insensitively): `.git`, `node_modules`, `.next`, `dist`, `build`, `coverage`, `target`, `.venv`, `__pycache__`.
+
+**Limits** (constants in `frontend/src-tauri/src/repository_files.rs`):
+
+| Limit | Value | When exceeded |
+|---|---|---|
+| Directory depth | 12 levels | deeper folders are shown empty and the tree is marked truncated |
+| Entries (files + folders) | 5,000 | listing stops (deterministically) and the tree is marked truncated |
+| File size | 1 MB | the file is not opened |
+
+Files that are not UTF-8 text (binary files) are not displayed. The tree is sorted deterministically: folders first, then files, each alphabetically (case-insensitive).
+
+**Browser vs desktop.** File browsing uses native commands, so it only works in the desktop app. In a browser, Open Repository shows "Open Repository is available in the CodeFrog desktop app." and no repository (and no files) can be selected; no fake data is shown.
+
+### Current desktop limitations
+
+- The explorer reads the tree and one file at a time on request. Nothing is scanned, indexed, searched, or sent anywhere, and it is not connected to the backend yet. There is no editor, no search, and no live file watching (use Refresh).
+- The Agent, Pull Requests, and Settings pages are placeholders; settings are not saved (API keys are never persisted in the browser).
+- The desktop shell's only native capabilities are the folder picker (`dialog:allow-open`) and four read-only commands (`select_repository`, `list_repository_tree`, `read_repository_file`, `clear_selected_repository`). There is no filesystem plugin, shell, or general Git access from the UI.
+- The Rust side (`frontend/src-tauri`) has not been compiled or run on every machine: it needs the Rust toolchain and, on Windows, the Visual Studio C++ Build Tools. `Cargo.lock` is created on the first desktop build; icons are generated placeholders.
