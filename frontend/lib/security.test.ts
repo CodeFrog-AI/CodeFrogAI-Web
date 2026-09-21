@@ -27,11 +27,27 @@ describe("frontend security guarantees", () => {
     }
   });
 
-  it("only ever invokes the single select_repository command", () => {
-    const invocations = UI_SOURCES.flatMap((file) => [...read(file).matchAll(/\binvoke\(([^)]*)\)/g)].map((match) => [file, match[1]]));
-    expect(invocations).toHaveLength(1);
-    expect(invocations[0][0]).toBe("lib/local-repository.ts");
-    expect(invocations[0][1]).toMatch(/^SELECT_REPOSITORY_COMMAND\b/);
+  it("only ever invokes the four intended commands, by constant, from the two service modules", () => {
+    const invocations = UI_SOURCES.flatMap((file) => [...read(file).matchAll(/\binvoke\(([^)]*)\)/g)].map((match) => `${file}: ${match[1].split(",")[0].trim()}`));
+    expect(invocations.sort()).toEqual([
+      "lib/local-repository.ts: SELECT_REPOSITORY_COMMAND",
+      "lib/repository-files.ts: CLEAR_SELECTION_COMMAND",
+      "lib/repository-files.ts: LIST_TREE_COMMAND",
+      "lib/repository-files.ts: READ_FILE_COMMAND",
+    ]);
+  });
+
+  it("keeps components away from Tauri: they only use the service modules", () => {
+    for (const file of sourceFiles("components")) {
+      expect(read(file), file).not.toMatch(/@tauri-apps|\binvoke\b/);
+    }
+  });
+
+  it("sends only a relative file path to the desktop app, never a root or an absolute path", () => {
+    const service = read("lib/repository-files.ts");
+    expect(service).toMatch(/invoke\(READ_FILE_COMMAND, \{ path \}\)/);
+    expect(service).toMatch(/invoke\(LIST_TREE_COMMAND\)/);
+    expect(service).toMatch(/isSafeRelativePath\(path\)/);
   });
 
   it("does not depend on filesystem, shell, process, or HTTP Tauri plugins", () => {
@@ -53,7 +69,13 @@ describe("frontend security guarantees", () => {
     expect(names.sort()).toEqual(["serde", "tauri", "tauri-plugin-dialog"]);
     const lib = read("src-tauri/src/lib.rs");
     expect([...lib.matchAll(/\.plugin\((.+)\)\s*$/gm)].map((match) => match[1])).toEqual(["tauri_plugin_dialog::init()"]);
-    expect(lib).toMatch(/generate_handler!\[repository::select_repository\]/);
+    const handler = lib.match(/generate_handler!\[([^\]]*)\]/)?.[1] ?? "";
+    expect(handler.split(",").map((name) => name.trim()).filter(Boolean)).toEqual([
+      "repository::select_repository",
+      "repository_files::list_repository_tree",
+      "repository_files::read_repository_file",
+      "repository_files::clear_selected_repository",
+    ]);
   });
 
   it("only starts the git program from Rust, never a shell or a caller-supplied program", () => {
@@ -62,7 +84,36 @@ describe("frontend security guarantees", () => {
     expect(programs).toEqual(['"git"']);
     expect(rust).not.toMatch(/"(sh|bash|cmd|cmd\.exe|powershell|pwsh)"|\.arg\("-c"\)|env::vars|std::env::var/);
     // The path is the command's only parameter.
-    expect(rust).toMatch(/pub async fn select_repository\(path: String\)/);
+    expect(rust).toMatch(/pub async fn select_repository\(\s*path: String,/);
+  });
+
+  it("keeps repository file access read-only, process-free, and unlogged in Rust", () => {
+    const rust = read("src-tauri/src/repository_files.rs").split("#[cfg(test)]")[0];
+    expect(rust).not.toMatch(/std::process|Command::new|fs::(write|remove|create|rename|copy|set_permissions)|OpenOptions|File::create|std::env|env::var/);
+    expect(rust).not.toMatch(/println!|eprintln!|dbg!|log::|tracing::/);
+  });
+
+  it("gives the file commands no root or absolute-path parameter: only a relative path", () => {
+    const rust = read("src-tauri/src/repository_files.rs");
+    expect(rust).toMatch(/pub async fn list_repository_tree\(\s*selection: State<'_, SelectedRepository>,\s*\)/);
+    expect(rust).toMatch(/pub async fn read_repository_file\(\s*path: String,\s*selection: State<'_, SelectedRepository>,\s*\)/);
+    expect(rust).toMatch(/pub fn clear_selected_repository\(selection: State<'_, SelectedRepository>\)/);
+    // The root only ever comes from the selected repository.
+    expect(rust.match(/selection\.get\(\)\?/g)).toHaveLength(2);
+  });
+
+  it("puts the same path boundary in front of reading files", () => {
+    const rust = read("src-tauri/src/repository_files.rs");
+    const reader = rust.slice(rust.indexOf("pub fn read_file("), rust.indexOf("fn too_large()"));
+    expect(reader.indexOf("validate_relative_path(raw_path)")).toBeGreaterThan(-1);
+    expect(reader.indexOf("validate_relative_path(raw_path)")).toBeLessThan(reader.indexOf("fs::canonicalize"));
+    expect(reader.indexOf("fs::canonicalize")).toBeLessThan(reader.indexOf("strip_prefix(root)"));
+    expect(reader.indexOf("strip_prefix(root)")).toBeLessThan(reader.indexOf("File::open"));
+  });
+
+  it("records the selected repository only after the folder passed validation", () => {
+    const rust = read("src-tauri/src/repository.rs");
+    expect(rust.indexOf("inspect_repository(&path)?")).toBeLessThan(rust.indexOf("selection.set("));
   });
 
   it("does not put credentials or keys in the desktop configuration", () => {
