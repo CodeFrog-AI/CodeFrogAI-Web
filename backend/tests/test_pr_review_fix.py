@@ -740,6 +740,50 @@ def test_applying_a_fix_needs_authentication_and_ownership(h, database):
     assert h.apply(finding, planned["plan"], planned["plan_signature"], number=999).status_code == 404 and llm.calls == []
 
 
+def test_the_fix_route_uses_the_signed_in_users_llm_configuration_not_the_server_or_embedding_one(h, monkeypatch):
+    from pydantic import SecretStr
+
+    from app.ai_settings import service as ai_service
+    from app.core.config import get_settings
+
+    user_llm_key, user_embedding_key, server_key = "sk-user-a-llm-key-AAAA", "sk-user-a-embedding-key-BBBB", "sk-server-llm-key-9999"
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_api_key", SecretStr(server_key))
+    monkeypatch.setattr(settings, "llm_model", "server-llm-model")
+    finding, planned = h.plan_of()  # planned with the server-side fake, before user A saves anything
+
+    saved = h.repo.client.put(
+        "/api/v1/settings/ai",
+        json={"llm_api_key": user_llm_key, "llm_model": "user-a-llm", "embedding_api_key": user_embedding_key, "embedding_model": "user-a-embed"},
+        headers=h.repo.headers,
+    )
+    assert saved.status_code == 200
+
+    server_calls, built, embeddings_built = [], [], []
+    agent = FakeLLM(calls(good_edit(), good_test_edit()), say("Fixed it."))
+
+    def user_llm(api_key, model, base_url, **_):
+        built.append((api_key, model))
+        agent.model = model
+        return agent
+
+    def server_llm():
+        server_calls.append("llm")
+        raise AssertionError("the server LLM must not be used when the user has their own configuration")
+
+    monkeypatch.setattr(ai_service, "OpenAICompatibleLLM", user_llm)
+    monkeypatch.setattr(ai_service, "OpenAIEmbeddingProvider", lambda api_key, model, base_url, **_: embeddings_built.append((api_key, model)))
+    monkeypatch.setattr(fix_routes, "get_llm_provider", server_llm)
+
+    response = h.apply(finding, planned["plan"], planned["plan_signature"])
+
+    assert response.status_code == 200, response.text
+    assert built == [(user_llm_key, "user-a-llm")]  # user A's LLM key and model, and nothing else
+    assert user_embedding_key not in [key for key, _ in built] and server_key not in [key for key, _ in built]
+    assert server_calls == [] and agent.calls  # the server fallback was never selected; the user's LLM did the work
+    assert not any(user_embedding_key in str(call) or user_llm_key in str(call) for call in agent.calls)  # no key reaches the model
+
+
 # ------------------------------------------------------------------ TEST RUNNER (unit)
 
 

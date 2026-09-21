@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.agent.executor import execute_plan
 from app.agent.llm import LLMError, LLMNotConfiguredError, get_llm_provider
+from app.ai_settings.service import embedding_factory_for, llm_provider_for
 from app.agent.planner import create_plan
 from app.agent.service import run_agent
 from app.analyzer.service import analyze_after_scan, get_repository_analysis
@@ -192,7 +193,7 @@ def scan_repository_files(
         raise NotFoundError("Repository was not found on GitHub or is not accessible") from None
     except GitHubContentError:
         raise BadGatewayError("GitHub request failed. Try again later.") from None
-    outcome = index_after_scan(session, repository, get_embedding_provider)
+    outcome = index_after_scan(session, repository, embedding_factory_for(session, current_user, get_embedding_provider))
     embedding_counts = vars(outcome.summary) if outcome.summary else {}
     return RepositoryScanResponse(
         **vars(summary),
@@ -244,7 +245,9 @@ def index_repository_chunk_embeddings(
 
     repository = get_owned_repository(session, repository_id, current_user)
     with _embedding_errors():
-        summary = index_repository_embeddings(session, repository, get_embedding_provider())
+        summary = index_repository_embeddings(
+            session, repository, embedding_factory_for(session, current_user, get_embedding_provider)()
+        )
     return EmbeddingIndexResponse(
         repository_id=repository.id, status="completed", **vars(summary)
     )
@@ -265,7 +268,7 @@ def semantic_search_repository(
     search_text = query.strip()
     with _embedding_errors():
         hits = semantic_search(
-            session, repository, get_embedding_provider(), search_text, limit, min_score
+            session, repository, embedding_factory_for(session, current_user, get_embedding_provider)(), search_text, limit, min_score
         )
     return SemanticSearchResponse(
         repository_id=repository.id,
@@ -304,7 +307,7 @@ def build_context(
 
     repository = get_owned_repository(session, repository_id, current_user)
     context = build_repository_context(
-        session, repository, get_embedding_provider, **payload.model_dump()
+        session, repository, embedding_factory_for(session, current_user, get_embedding_provider), **payload.model_dump()
     )
     return RepositoryContextResponse.model_validate(asdict(context))
 
@@ -337,8 +340,8 @@ def ask_agent(
             current_user,
             repository,
             payload.message,
-            get_llm_provider(),
-            get_embedding_provider,
+            llm_provider_for(session, current_user, get_llm_provider),
+            embedding_factory_for(session, current_user, get_embedding_provider),
             history=[item.model_dump() for item in payload.history],
             max_iterations=get_settings().agent_max_iterations,
             checkout=workspace_service.open_checkout(get_workspace_root(), repository),
@@ -376,8 +379,8 @@ def plan_change(
             current_user,
             repository,
             payload.message,
-            get_llm_provider(),
-            get_embedding_provider,
+            llm_provider_for(session, current_user, get_llm_provider),
+            embedding_factory_for(session, current_user, get_embedding_provider),
             history=[item.model_dump() for item in payload.history],
             max_iterations=get_settings().agent_max_iterations,
             checkout=workspace_service.open_checkout(get_workspace_root(), repository),
@@ -419,8 +422,8 @@ def execute_change(
             repository,
             payload.message,
             payload.plan,
-            get_llm_provider(),
-            get_embedding_provider,
+            llm_provider_for(session, current_user, get_llm_provider),
+            embedding_factory_for(session, current_user, get_embedding_provider),
             workspace_root=get_workspace_root(),
             max_iterations=get_settings().agent_max_iterations,
         )

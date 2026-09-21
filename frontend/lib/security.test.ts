@@ -88,6 +88,27 @@ describe("frontend security guarantees", () => {
     expect(UI_SOURCES.filter((file) => /[?&]access_token=/.test(read(file)))).toEqual([]);
   });
 
+  it("sends AI provider keys only to /api/v1/settings/ai, never in a URL, and never stores them", () => {
+    const settings = read("lib/ai-settings.ts");
+    const paths = [...settings.matchAll(/"(\/api\/v1\/[^"]*)"/g)].map((match) => match[1]);
+    expect(paths).toEqual(["/api/v1/settings/ai"]);
+    expect(settings).toMatch(/LLM_KEY_PATH = `\$\{AI_SETTINGS_PATH\}\/llm-key`/);
+    expect(settings).toMatch(/EMBEDDING_KEY_PATH = `\$\{AI_SETTINGS_PATH\}\/embedding-key`/);
+    expect(settings).not.toMatch(/localStorage|sessionStorage|console\./);
+    // Only the PUT carries a body, and no request path is built from a key.
+    expect(settings.match(/body:/g)).toHaveLength(1);
+    expect(settings).not.toMatch(/`[^`]*\$\{[^}]*[Kk]ey[^}]*\}[^`]*`/);
+    const page = read("components/pages/SettingsPage.tsx");
+    expect(page).not.toMatch(/localStorage|sessionStorage|indexedDB|document\.cookie|console\.|\bfetch\(/);
+    expect(page.match(/type="password"/g)).toHaveLength(2);
+    expect(page.match(/type="password"\s+autoComplete="off"/g)).toHaveLength(2);
+    // No user-configurable provider address.
+    expect(`${page}${settings}`).not.toMatch(/base_?url|baseUrl/i);
+    for (const file of UI_SOURCES.filter((f) => f !== "lib/ai-settings.ts" && f !== "lib/api.ts")) {
+      expect(read(file), file).not.toMatch(/\/api\/v1\/settings\/ai/);
+    }
+  });
+
   it("only accepts fixed backend API paths", () => {
     expect(read("lib/api.ts")).toMatch(/API_PATH = \/\^\\\/api\\\/v1\\\//);
   });

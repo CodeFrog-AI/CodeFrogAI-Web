@@ -57,6 +57,22 @@ class User(TimestampMixin, Base):
     agent_tasks: Mapped[list["AgentTask"]] = relationship(back_populates="user")
 
 
+class UserAISettings(TimestampMixin, Base):
+    """A user's own AI provider settings. API keys are stored encrypted and never returned."""
+
+    __tablename__ = "user_ai_settings"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_user_ai_settings_user_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    llm_api_key_encrypted: Mapped[str | None] = mapped_column(Text)
+    llm_api_key_hint: Mapped[str | None] = mapped_column(String(8))  # last 4 characters, for display
+    llm_model: Mapped[str | None] = mapped_column(String(128))
+    embedding_api_key_encrypted: Mapped[str | None] = mapped_column(Text)
+    embedding_api_key_hint: Mapped[str | None] = mapped_column(String(8))
+    embedding_model: Mapped[str | None] = mapped_column(String(128))
+
+
 class GitHubAccount(TimestampMixin, Base):
     __tablename__ = "github_accounts"
     __table_args__ = (UniqueConstraint("github_user_id", name="uq_github_accounts_github_user_id"),)

@@ -1244,6 +1244,7 @@ FRONTEND_URL=http://localhost:3000
 ```
 
 - `TOKEN_ENCRYPTION_KEY` is a Fernet key (`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`). It is **required**: the GitHub token is stored encrypted, and sign-in fails with a clear error if the key is missing or invalid instead of pretending to connect.
+- `LLM_*` and `EMBEDDING_*` are the **server defaults** for the AI provider. Each signed-in user can save their own LLM key/model and embedding key/model in **Settings**; those override the server defaults for that user, and anything a user has not set falls back to them. The two sides are independent (an LLM key is never used for embeddings, or the reverse; the same key may be entered on both). User keys are stored encrypted with `TOKEN_ENCRYPTION_KEY`, never returned by the API (only the last 4 characters are shown), and never logged. The key is not tested against the provider on save. Base URLs stay server-side (`LLM_BASE_URL`, `EMBEDDING_BASE_URL`). After changing the embedding model, re-scan your repositories to rebuild embeddings.
 - `GITHUB_OAUTH_SCOPES` defaults to `read:user user:email repo`. `read:user` and `user:email` (identity) are always requested even if you leave them out. `repo` is needed to list private repositories, clone, push, and open pull requests. Anyone who signed in before with narrower scopes must reconnect.
 - `FRONTEND_URL` is an origin (no path). It is where the OAuth callback sends the browser, and the only CORS origin.
 
@@ -1343,6 +1344,6 @@ Files that are not UTF-8 text (binary files) are not displayed. The tree is sort
 ### Current desktop limitations
 
 - The explorer reads the tree and one file at a time on request. Nothing is scanned, indexed, searched, or sent anywhere, and it is not connected to the backend yet. There is no editor, no search, and no live file watching (use Refresh).
-- The Agent, Pull Requests, and Settings pages are placeholders; settings are not saved (API keys are never persisted in the browser).
+- The Agent and Pull Requests pages are placeholders. Settings saves your own AI provider keys and models through `/api/v1/settings/ai` (keys are never persisted in the browser, never pre-filled, and cleared after saving).
 - The desktop shell's only native capabilities are the folder picker (`dialog:allow-open`) and four read-only commands (`select_repository`, `list_repository_tree`, `read_repository_file`, `clear_selected_repository`). There is no filesystem plugin, shell, or general Git access from the UI.
 - The Rust side (`frontend/src-tauri`) has not been compiled or run on every machine: it needs the Rust toolchain and, on Windows, the Visual Studio C++ Build Tools. `Cargo.lock` is created on the first desktop build; icons are generated placeholders.

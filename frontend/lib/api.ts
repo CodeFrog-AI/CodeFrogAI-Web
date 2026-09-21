@@ -94,7 +94,7 @@ function defaultDeps(): ApiDeps {
 const API_PATH = /^\/api\/v1\/[A-Za-z0-9_\-/]*$/;
 
 export interface RequestOptions {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: unknown;
 }
 

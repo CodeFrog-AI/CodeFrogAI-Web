@@ -15,6 +15,7 @@ from app.db.models.entities import (
     TestRun,
     ToolCall,
     User,
+    UserAISettings,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "TestRun",
     "ToolCall",
     "User",
+    "UserAISettings",
 ]
