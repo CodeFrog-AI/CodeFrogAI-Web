@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Path
 from sqlalchemy.orm import Session
 
 from app.agent.llm import get_llm_provider
+from app.ai_settings.service import embedding_factory_for, llm_provider_for
 from app.agent.planner import create_plan
 from app.api.routes.repositories import _agent_errors
 from app.api.routes.repository_git import _require_approval
@@ -86,7 +87,7 @@ def plan_fix(repository_id: uuid.UUID, number: PullNumber, payload: FixPlanReque
     repository = get_owned_repository(session, repository_id, current_user)
     root = get_workspace_root()
     with _agent_errors():
-        provider = get_llm_provider()
+        provider = llm_provider_for(session, current_user, get_llm_provider)
         with pull_request_errors(), pull_request_client(repository) as client:
             pull_request = client.get_pull_request(repository.owner, repository.name, number)
             diff = sanitize_diff(client.get_pull_request_diff(repository.owner, repository.name, number))
@@ -99,7 +100,7 @@ def plan_fix(repository_id: uuid.UUID, number: PullNumber, payload: FixPlanReque
             repository,
             fix_service.build_fix_message(verified.finding, head_branch=pull_request.head_branch),
             provider,
-            get_embedding_provider,
+            embedding_factory_for(session, current_user, get_embedding_provider),
             max_iterations=get_settings().agent_max_iterations,
             checkout=workspace_service.open_checkout(root, repository),
             extra_instructions=fix_service.FIX_PLAN_INSTRUCTIONS.replace("{max_files}", str(fix_service.MAX_PLAN_FILES)),
@@ -130,14 +131,15 @@ def apply_fix(repository_id: uuid.UUID, number: PullNumber, payload: FixRequest,
     _require_approval(payload)
     root = get_workspace_root()
     with _agent_errors():
-        provider = get_llm_provider()
+        provider = llm_provider_for(session, current_user, get_llm_provider)
         pull_request, diff = _fetch(repository, number)
         verified = fix_service.verify_selected_finding(repository, number, payload.finding, pull_request=pull_request, diff=diff)
         fix_service.verify_plan_signature(repository, number, payload.finding, payload.plan, payload.plan_signature)
         fix_service.validate_fix_plan(payload.plan, verified.finding)
         with exclusive_workspace(root, repository.id):
             outcome = fix_service.run_fix(
-                session, current_user, repository, pull_request, verified.finding, payload.plan, provider, get_embedding_provider,
+                session, current_user, repository, pull_request, verified.finding, payload.plan, provider,
+                embedding_factory_for(session, current_user, get_embedding_provider),
                 base_directory=root, max_iterations=get_settings().agent_max_iterations,
             )
     execution = outcome.execution

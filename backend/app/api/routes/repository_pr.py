@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Path
 from sqlalchemy.orm import Session
 
 from app.agent.llm import get_llm_provider
+from app.ai_settings.service import embedding_factory_for, llm_provider_for
 from app.agent.reviewer import review_pull_request
 from app.api.routes.repositories import _agent_errors
 from app.auth.dependencies import get_current_user
@@ -137,7 +138,7 @@ def review_pull_request_endpoint(
     repository = get_owned_repository(session, repository_id, current_user)
     _require_approval(payload)
     with _agent_errors():
-        provider = get_llm_provider()
+        provider = llm_provider_for(session, current_user, get_llm_provider)
         with pull_request_errors(), pull_request_client(repository) as client:
             pull_request = client.get_pull_request(repository.owner, repository.name, number)
             diff = sanitize_diff(client.get_pull_request_diff(repository.owner, repository.name, number))
@@ -148,7 +149,7 @@ def review_pull_request_endpoint(
             pull_request,
             diff,
             provider,
-            get_embedding_provider,
+            embedding_factory_for(session, current_user, get_embedding_provider),
             max_iterations=get_settings().agent_max_iterations,
         )
     return ReviewResponse(
