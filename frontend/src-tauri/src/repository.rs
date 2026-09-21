@@ -5,6 +5,7 @@
 //! with a fixed set of read-only subcommands, as an argument list (no shell). Errors are
 //! structured codes with fixed messages, never raw operating-system or Git output.
 
+use crate::repository_files::SelectedRepository;
 use serde::Serialize;
 use std::fs;
 use std::io::ErrorKind;
@@ -51,18 +52,33 @@ pub struct RepositoryInfo {
     pub remote_url: Option<String>,
 }
 
-/// Validates the selected directory and returns its Git metadata.
+/// Validates the selected directory and returns its Git metadata. On success the folder also
+/// becomes the *selected repository*: the only root the file explorer commands may read.
 ///
 /// Runs on a blocking thread so a slow disk or a large repository cannot freeze the window.
 #[tauri::command]
-pub async fn select_repository(path: String) -> Result<RepositoryInfo, SelectRepositoryError> {
-    match tauri::async_runtime::spawn_blocking(move || inspect_repository(&path)).await {
-        Ok(result) => result,
-        Err(_) => Err(SelectRepositoryError::new(
-            ErrorCode::GitError,
-            "The repository could not be read.",
-        )),
-    }
+pub async fn select_repository(
+    path: String,
+    selection: tauri::State<'_, SelectedRepository>,
+) -> Result<RepositoryInfo, SelectRepositoryError> {
+    let info = match tauri::async_runtime::spawn_blocking(move || {
+        let info = inspect_repository(&path)?;
+        // The canonical path is the boundary the file explorer enforces.
+        let root = fs::canonicalize(&info.path).map_err(|_| git_failure())?;
+        Ok::<_, SelectRepositoryError>((info, root))
+    })
+    .await
+    {
+        Ok(result) => result?,
+        Err(_) => {
+            return Err(SelectRepositoryError::new(
+                ErrorCode::GitError,
+                "The repository could not be read.",
+            ))
+        }
+    };
+    selection.set(info.1);
+    Ok(info.0)
 }
 
 pub fn inspect_repository(raw_path: &str) -> Result<RepositoryInfo, SelectRepositoryError> {

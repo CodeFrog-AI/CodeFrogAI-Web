@@ -6,10 +6,12 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { RepositoryExplorer } from "@/components/repository/RepositoryExplorer";
 import { useApp } from "@/lib/app-context";
 import type { RepositoryInfo } from "@/lib/app-state";
 import { selectLocalRepository, toRepositoryError, type LocalRepositoryError } from "@/lib/local-repository";
 import { describeBranch, describeGitStatus, describeRemote } from "@/lib/repository";
+import { clearRepositorySelection } from "@/lib/repository-files";
 
 type OpenState = { kind: "idle" } | { kind: "loading" } | { kind: "error"; error: LocalRepositoryError };
 
@@ -108,7 +110,13 @@ function RepositoryDashboard({ repository }: { repository: RepositoryInfo }) {
           <Button onClick={open} disabled={loading} aria-busy={loading}>
             {loading ? "Opening…" : "Open another repository"}
           </Button>
-          <Button variant="ghost" onClick={() => dispatch({ type: "clear-repository" })}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              void clearRepositorySelection();
+              dispatch({ type: "clear-repository" });
+            }}
+          >
             Close repository
           </Button>
         </div>
@@ -117,6 +125,9 @@ function RepositoryDashboard({ repository }: { repository: RepositoryInfo }) {
         </p>
         {state.kind === "error" && <OpenRepositoryError error={state.error} onRetry={open} />}
       </Card>
+
+      {/* Keyed by path: opening another repository starts a fresh explorer. */}
+      <RepositoryExplorer key={repository.path} />
     </PageContainer>
   );
 }
