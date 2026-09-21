@@ -12,6 +12,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
-# No plugins on purpose: no filesystem, shell, or Git access from the UI in this phase.
+# Plugins are limited to the folder picker on purpose: no filesystem, shell, or Git plugin.
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

@@ -1,20 +1,15 @@
 import type { RepositoryInfo } from "@/lib/app-state";
 
-export const NOT_ANALYZED = "Not analyzed yet";
+/** Display helpers for a selected repository. */
 
-/**
- * Placeholder data for the UI until real repository selection exists. It is clearly a sample:
- * nothing here is read from disk or GitHub.
- */
-export const SAMPLE_REPOSITORY: RepositoryInfo = {
-  name: "sample-project",
-  path: "~/projects/sample-project",
-  branch: "main",
-  status: NOT_ANALYZED,
-  projectType: NOT_ANALYZED,
-  languages: [],
-};
+export function describeBranch(branch: RepositoryInfo["branch"]): string {
+  return branch ?? "Detached HEAD";
+}
 
-export function describeLanguages(languages: readonly string[]): string {
-  return languages.length > 0 ? languages.join(", ") : NOT_ANALYZED;
+export function describeGitStatus(isDirty: boolean): string {
+  return isDirty ? "Uncommitted changes" : "Clean";
+}
+
+export function describeRemote(remoteUrl: RepositoryInfo["remoteUrl"]): string {
+  return remoteUrl ?? "No remote configured";
 }

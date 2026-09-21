@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { appReducer, initialState, isPage, PAGES, pageDefinition, type AppState } from "@/lib/app-state";
-import { SAMPLE_REPOSITORY } from "@/lib/repository";
+import { TEST_REPOSITORY } from "@/lib/fixtures";
 
 describe("appReducer", () => {
   it("starts on the repositories page with nothing selected", () => {
@@ -23,9 +23,15 @@ describe("appReducer", () => {
 
   it("selects and clears a repository without changing the page", () => {
     const onAgent: AppState = { ...initialState, page: "agent" };
-    const selected = appReducer(onAgent, { type: "select-repository", repository: SAMPLE_REPOSITORY });
-    expect(selected).toEqual({ page: "agent", repository: SAMPLE_REPOSITORY });
+    const selected = appReducer(onAgent, { type: "select-repository", repository: TEST_REPOSITORY });
+    expect(selected).toEqual({ page: "agent", repository: TEST_REPOSITORY });
     expect(appReducer(selected, { type: "clear-repository" })).toEqual(onAgent);
+  });
+
+  it("replaces the selected repository when another one is opened", () => {
+    const first = appReducer(initialState, { type: "select-repository", repository: TEST_REPOSITORY });
+    const other = { ...TEST_REPOSITORY, name: "other", path: "/home/dev/other", branch: null, isDirty: true, remoteUrl: null };
+    expect(appReducer(first, { type: "select-repository", repository: other }).repository).toEqual(other);
   });
 
   it("does not create a new state when clearing an empty selection", () => {
@@ -34,7 +40,7 @@ describe("appReducer", () => {
 
   it("does not mutate the previous state", () => {
     const before = structuredClone(initialState);
-    appReducer(initialState, { type: "select-repository", repository: SAMPLE_REPOSITORY });
+    appReducer(initialState, { type: "select-repository", repository: TEST_REPOSITORY });
     expect(initialState).toEqual(before);
   });
 });
